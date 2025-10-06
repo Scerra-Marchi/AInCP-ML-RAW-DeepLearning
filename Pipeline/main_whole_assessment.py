@@ -17,7 +17,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #data_folder = 'C:/Users/david/Documents/University/Borsa di Studio - REDCap/only_AC-80_patients/'
 data_folder = '../../../Dati_RAW/'
 
-number_of_iterations = 5
+number_of_iterations = 1
 min_mean_test_score = 0.7
 window_size = 6400
 
@@ -137,9 +137,11 @@ if not os.path.exists(folder + 'Iteration_0/Week_stats/predictions_dataframe.csv
     processes = []
 
     # Creazione lista timestamps
-    if not os.path.exists('timestamps_list'):
+    timestamps_path = 'timestamps_list'
+    if not os.path.exists(timestamps_path):
         timestamps = create_timestamps_list(data_folder)
-        jl.dump(timestamps, 'timestamps_list')
+        print('Lunghezza lista timestamps:', len(timestamps))
+        jl.dump(timestamps, timestamps_path)
 
 
     for iteration in range(number_of_iterations):
@@ -150,7 +152,7 @@ if not os.path.exists(folder + 'Iteration_0/Week_stats/predictions_dataframe.csv
             data = json.load(file)
         retrieved_test_indexes = data['Test Indexes']
 
-        p = multiprocessing.Process(target=plot_dashboards, args=(data_folder, save_folder, retrieved_test_indexes, min_mean_test_score, window_size))
+        p = multiprocessing.Process(target=plot_dashboards, args=(data_folder, save_folder, timestamps_path, retrieved_test_indexes, min_mean_test_score, window_size))
         
         p.start()
         processes.append(p)
@@ -168,20 +170,6 @@ if not os.path.exists(folder + 'Scatter_AHA_CPI_Home-AHA.png'):
         iterations_folders.append(folder + 'Iteration_' + str(iteration) + '/')
 
     plot_corrcoeff(iterations_folders=iterations_folders, save_folder=folder)
-
-if not os.path.exists(folder + 'AI_plots/'):
-    
-    os.makedirs(folder + 'AI_plots/')
-
-    print(' ----- PLOTTING AI ----- ')
-
-    save_folder = folder + 'AI_plots/'
-
-    # Reading from a JSON file and accessing data
-    with open(folder + 'Iteration_0/iteration_data.json', 'r') as file:
-        data = json.load(file)
-    retrieved_test_indexes = data['Test Indexes']
-    plot_AI_raw(data_folder, save_folder, retrieved_test_indexes)
 
 print(' ----- ESECUZIONE DEL MAIN TERMINATA ----- ')
 

@@ -21,7 +21,7 @@ def create_timestamps_list(data_folder):
     return timestamps_list
 
 
-def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_score, window_size):
+def plot_dashboards(data_folder, save_folder, timestamps_file, subjects_indexes, min_mean_test_score, window_size):
         
     #warnings.filterwarnings("ignore")
 
@@ -65,7 +65,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     regressor = jl.load(reg_path)
 
     os.makedirs(stats_folder, exist_ok=True)
-    timestamps = jl.load('timestamps_list')     # Si carica la lista dei timestamps
+    timestamps = jl.load(timestamps_file)     # Si carica la lista dei timestamps
 
     ds_freq = 26.67     # Frequenza di campionamento del segnale decimato (Hz)
     sample_size = math.ceil(window_size / ds_freq)   # Dimensione IN SECONDI del campione (finestra) -> 6400 / 26.67 ≃ 240 secondi
