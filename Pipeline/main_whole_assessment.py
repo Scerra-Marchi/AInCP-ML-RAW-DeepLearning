@@ -9,7 +9,6 @@ from train_select_classifiers import train_select_classifiers
 from train_regressor import train_regressor
 from test_classifier_regressor import test_classifier_regressor
 from plotting import plot_dashboards, plot_corrcoeff, create_timestamps_list
-from AI_plot import plot_AI_raw
 
 # Cambio la directory di esecuzione in quella dove si trova questo file
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -17,7 +16,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 #data_folder = 'C:/Users/david/Documents/University/Borsa di Studio - REDCap/only_AC-80_patients/'
 data_folder = '../../../Dati_RAW/'
 
-number_of_iterations = 1
+number_of_iterations = 5
 min_mean_test_score = 0.7
 window_size = 6400
 
@@ -140,8 +139,8 @@ if not os.path.exists(folder + 'Iteration_0/Week_stats/predictions_dataframe.csv
     timestamps_path = 'timestamps_list'
     if not os.path.exists(timestamps_path):
         timestamps = create_timestamps_list(data_folder)
-        print('Lunghezza lista timestamps:', len(timestamps))
-        jl.dump(timestamps, timestamps_path)
+        # print('Lunghezza lista timestamps:', len(timestamps))
+        jl.dump(timestamps, timestamps_path)    # La lista dei timestamp viene salvata in un file all'interno della cartella corrente
 
 
     for iteration in range(number_of_iterations):
