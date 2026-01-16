@@ -1,0 +1,3 @@
+,subject,MACS,age_aha,hemi,gender,side_hemi,AHA,AI_aha,AI_week,healthy_percentage,predicted_aha
+53,54,0,15.463013698630137,1,2,0,100,1.59,1.28,"[0.0, 0.0]",84.5
+11,12,1,7.123287671232877,2,1,1,65,38.72,11.68,"[0.0, 0.0]",84.5

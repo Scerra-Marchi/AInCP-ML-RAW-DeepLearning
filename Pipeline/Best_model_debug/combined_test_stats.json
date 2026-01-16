@@ -1,0 +1,39 @@
+{
+    "Best Classifier Stats": {
+        "Method": "ai",
+        "Window Size": 6400,
+        "Model Type": "TimeSeriesKMeans",
+        "Gridsearch Hash": "33f2a5675b",
+        "Correlation Coefficient": NaN
+    },
+    "Regressor Stats": {
+        "Regressor path": "regressor_a6b810a85e",
+        "R2 Score": -0.013061224489795853,
+        "Classifiers Used": [
+            {
+                "average_params": null,
+                "averaging_method": "mean",
+                "distance_params": null,
+                "init_algorithm": "kmeans++",
+                "max_iter": 300,
+                "metric": "euclidean",
+                "n_clusters": 2,
+                "n_init": 10,
+                "random_state": null,
+                "tol": 1e-06,
+                "verbose": false
+            },
+            {
+                "distance_params": null,
+                "init_algorithm": "forgy",
+                "max_iter": 300,
+                "metric": "euclidean",
+                "n_clusters": 2,
+                "n_init": 10,
+                "random_state": null,
+                "tol": 1e-06,
+                "verbose": false
+            }
+        ]
+    }
+}

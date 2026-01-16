@@ -15,7 +15,7 @@ __pycache__/
 **/Results/
 
 # ignore timestamp list
-**/timestamp_list
+**/timestamps_list
 
 # ignore Dataset
 Dataset/
