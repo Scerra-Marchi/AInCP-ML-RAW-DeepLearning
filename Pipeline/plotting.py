@@ -15,18 +15,25 @@ import math
 
 
 def create_timestamps_list(data_folder):
-    patient_df = pd.read_csv(data_folder + 'data/week/1_week_RAW.csv')  # I pazienti hanno tutti lo stesso numero di campioni
+    patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv')  # I pazienti hanno tutti lo stesso numero di campioni
     datetimes = pd.to_datetime(patient_df[::3]['datetime'], format='%Y-%m-%d %H:%M:%S.%f')
     timestamps_list = matplotlib.dates.date2num(datetimes.dt.to_pydatetime())
     return timestamps_list
 
 
-def plot_dashboards(data_folder, save_folder, timestamps_file, subjects_indexes, min_mean_test_score, window_size):
+def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_score, window_size, decimation_factor):
         
     #warnings.filterwarnings("ignore")
 
     # Cambio la directory di esecuzione in quella dove si trova questo file
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Creazione lista timestamps
+    timestamps_file = 'timestamps_list'
+    if not os.path.exists(timestamps_file):
+        timestamps = create_timestamps_list(data_folder)
+        # print('Lunghezza lista timestamps:', len(timestamps))
+        jl.dump(timestamps, timestamps_file)    # La lista dei timestamp viene salvata in un file all'interno della cartella corrente
 
     stats_folder = save_folder + 'Week_stats/'
 
@@ -40,25 +47,25 @@ def plot_dashboards(data_folder, save_folder, timestamps_file, subjects_indexes,
     #estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] == 1) & (best_estimators_df['method'] == 'difference')].iterrows()]
 
     #estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= 0.954) & (best_estimators_df['window_size'] == 300)].iterrows()]
-    estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= min_mean_test_score) & (best_estimators_df['window_size'] == window_size)].iterrows()]
+    estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= min_mean_test_score) & (best_estimators_df['window_size'] == window_size) & (best_estimators_df['decimation_factor'] == decimation_factor)].iterrows()]
     
     print('Expected estimators: ',len(estimators_specs_list))
     estimators_list = []
     model_id_concat = ''
     
     for estimators_specs in estimators_specs_list:
-        estimator_dir = save_folder +"Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
+        estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
 
         with open(estimator_dir + 'GridSearchCV_stats/best_estimator_stats.json', "r") as stats_f:
             grid_search_best_params = json.load(stats_f)
         
         print('Loading -> ', estimator_dir + 'best_estimator.zip')
         estimator = BaseEstimator().load_from_path(estimator_dir + 'best_estimator.zip')
-        estimators_list.append({'estimator': estimator, 'method': estimators_specs['method'], 'window_size': estimators_specs['window_size'], 'hemi_cluster': grid_search_best_params['Hemi cluster']})
+        estimators_list.append({'estimator': estimator, 'method': estimators_specs['method'], 'window_size': estimators_specs['window_size'], 'decimation_factor': estimators_specs['decimation_factor'], 'hemi_cluster': grid_search_best_params['Hemi cluster']})
         print('Loaded -> ', estimator_dir + 'best_estimator.zip')
         model_id_concat = model_id_concat + str(estimator.get_params())
 
-    metadata = pd.read_excel(data_folder + 'metadata2022_04.xlsx').iloc[subjects_indexes]
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
     metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # 'age_aha', 'gender', 
 
     reg_path = save_folder + 'Regressors/regressor_'+ (hashlib.sha256((model_id_concat).encode()).hexdigest()[:10])
@@ -67,7 +74,7 @@ def plot_dashboards(data_folder, save_folder, timestamps_file, subjects_indexes,
     os.makedirs(stats_folder, exist_ok=True)
     timestamps = jl.load(timestamps_file)     # Si carica la lista dei timestamps
 
-    ds_freq = 26.67     # Frequenza di campionamento del segnale decimato (Hz)
+    ds_freq = 80/decimation_factor   # Frequenza di campionamento del segnale decimato (Hz)
     sample_size = math.ceil(window_size / ds_freq)   # Dimensione IN SECONDI del campione (finestra) -> 6400 / 26.67 ≃ 240 secondi
 
     trend_block_size = int((60 * 60 * 6) / sample_size)  # Numero di finestre raggruppate in un blocco da 6 ore

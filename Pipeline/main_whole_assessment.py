@@ -8,7 +8,7 @@ from sklearn.model_selection import RepeatedStratifiedKFold
 from train_select_classifiers import train_select_classifiers
 from train_regressor import train_regressor
 from test_classifier_regressor import test_classifier_regressor
-from plotting import plot_dashboards, plot_corrcoeff, create_timestamps_list
+from plotting import plot_dashboards, plot_corrcoeff
 
 # Cambio la directory di esecuzione in quella dove si trova questo file
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +28,7 @@ if not os.path.exists(folder):
     print(' ----- CREATING ITERATIONS FOLDERS AND TRAINING CLASSIFIERS ----- ')
     processes = []
     iteration = 0
-    metadata = pd.read_excel(data_folder + 'metadata2022_04.xlsx')
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx')
     labels = metadata['hemi'].values    # Maybe it is better to straify on AHA as well?
     rskf = RepeatedStratifiedKFold(n_splits=number_of_iterations, n_repeats=1, random_state=42)
 
@@ -135,13 +135,6 @@ if not os.path.exists(folder + 'Iteration_0/Week_stats/predictions_dataframe.csv
     print(' ----- PLOTTING PREDICTIONS ----- ')
     processes = []
 
-    # Creazione lista timestamps
-    timestamps_path = 'timestamps_list'
-    if not os.path.exists(timestamps_path):
-        timestamps = create_timestamps_list(data_folder)
-        # print('Lunghezza lista timestamps:', len(timestamps))
-        jl.dump(timestamps, timestamps_path)    # La lista dei timestamp viene salvata in un file all'interno della cartella corrente
-
 
     for iteration in range(number_of_iterations):
 
@@ -151,7 +144,7 @@ if not os.path.exists(folder + 'Iteration_0/Week_stats/predictions_dataframe.csv
             data = json.load(file)
         retrieved_test_indexes = data['Test Indexes']
 
-        p = multiprocessing.Process(target=plot_dashboards, args=(data_folder, save_folder, timestamps_path, retrieved_test_indexes, min_mean_test_score, window_size))
+        p = multiprocessing.Process(target=plot_dashboards, args=(data_folder, save_folder, retrieved_test_indexes, min_mean_test_score, window_size))
         
         p.start()
         processes.append(p)

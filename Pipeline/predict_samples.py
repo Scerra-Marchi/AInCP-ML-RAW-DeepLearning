@@ -13,8 +13,8 @@ def predict_samples(data_folder, estimators, patient):
         print('You have selected estimators that operates on different window sizes')
         exit(1)
 
-    df = pd.read_csv(data_folder + 'data/week/' + str(patient) + '_week_RAW.csv')
-    df = decimate_df(df, 3) # Decimazione delle time series a 26.67Hz
+    df = pd.read_csv(data_folder + 'week/' + str(patient) + '_week_RAW.csv')
+    df = decimate_df(df, estimators[0]['decimation_factor']) # Decimazione delle time series 
     magnitude_D = np.sqrt(np.square(np.array(df['x_D'])) + np.square(np.array(df['y_D'])) + np.square(np.array(df['z_D'])))
     magnitude_ND = np.sqrt(np.square(np.array(df['x_ND'])) + np.square(np.array(df['y_ND'])) + np.square(np.array(df['z_ND'])))
 

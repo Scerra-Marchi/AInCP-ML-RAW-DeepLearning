@@ -21,17 +21,17 @@ def scorer_f(estimator, X_train, Y_train):
         inverted_y_pred = [1 if item == 0 else 0 for item in y_pred]
         return max(f1_score(Y_train, y_pred, average='weighted'),f1_score(Y_train, inverted_y_pred, average='weighted'))
 
-def train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_type, model_params, method, window_size):
+def train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_type, model_params, method, window_size, decimation_factor):
 
     # Split the string into the module and class names
     module_name, class_name = model_type.rsplit(".", 1)
     model = getattr(importlib.import_module(module_name), class_name)()
 
-    X, _, _, y = create_windows(data_folder, subjects_indexes, method, window_size)
+    X, _, _, y = create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor)
  
     param_grid = model_params
-    #                                                             dobbiamo fixare il seed?
-    parameter_tuning_method = GridSearchCV(model, param_grid, cv=StratifiedKFold(n_splits=5, shuffle=True), n_jobs=-1, return_train_score=True, verbose=3, scoring=scorer_f)
+    #                                                             dobbiamo fixare il seed? FATTP
+    parameter_tuning_method = GridSearchCV(model, param_grid, cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42), n_jobs=-1, return_train_score=True, verbose=3, scoring=scorer_f)
     parameter_tuning_method.fit(X, y)
 
     estimator = parameter_tuning_method.best_estimator_

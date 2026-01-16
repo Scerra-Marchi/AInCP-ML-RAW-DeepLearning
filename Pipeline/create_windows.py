@@ -17,18 +17,18 @@ def decimate_df(data, factor):
     # Creare un nuovo DataFrame con i dati decimati e i timestamps
     return pd.concat([timestamps, df_decimated], axis=1)
 
-def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE):
+def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, decimation_factor):
     series = []
     y_AHA = []
     y_MACS =[]
     y = []
-    metadata = pd.read_excel(data_folder + 'metadata2022_04.xlsx').iloc[subjects_indexes]
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
 
     for index in range (metadata.shape[0]):
-        df = pd.read_csv(data_folder + 'data/AHA/' + str(metadata['subject'].iloc[index]) + '_AHA_RAW.csv')
+        df = pd.read_csv(data_folder + 'AHA/' + str(metadata['subject'].iloc[index]) + '_AHA_RAW.csv')
 
         # Si fa il downsampling della time series, prendendo un campione ogni 3 (80 Hz -> 26.67 Hz)
-        df = decimate_df(df, 3)
+        df = decimate_df(df, decimation_factor)
 
         # Nel caso in cui non bastasse una duplicazione dell'intera time series questa verrà scartata
         if df.shape[0]<WINDOW_SIZE:

@@ -45,7 +45,7 @@ def test_regressor(data_folder, save_folder, train_indexes, test_indexes, mean_t
 
     print('Loaded estimators: ',len(estimators_list))
 
-    metadata = pd.read_excel(data_folder + 'metadata2022_04.xlsx').iloc[test_indexes]
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[test_indexes]
     metadata.drop(['age_aha', 'gender', 'dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True)
 
     reg_path =  save_folder + 'Regressors/regressor_'+ (hashlib.sha256((model_id_concat).encode()).hexdigest()[:10])

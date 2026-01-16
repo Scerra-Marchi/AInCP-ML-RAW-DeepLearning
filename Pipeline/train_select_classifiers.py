@@ -9,14 +9,14 @@ from train_best_model import train_best_model
 
 #warnings.filterwarnings("ignore")
 
-def train_select_classifiers(data_folder, save_folder, subjects_indexes, l_window_size = [300, 600, 900], l_method = ['concat','difference', 'ai']):
+def train_select_classifiers(data_folder, save_folder, subjects_indexes, l_window_size = [300, 600, 900], l_method = ['concat','difference', 'ai'], l_decimation_factor = [3]):
 
     kmeans_type = 'sktime.clustering.k_means.TimeSeriesKMeans'
-    kmeans_params =  {'averaging_method': ['mean'], 'init_algorithm': ['kmeans++', 'forgy'], 'metric': ['euclidean', 'dtw'], 'n_clusters': [2]}
+    kmeans_params =  {'averaging_method': ['mean'], 'init_algorithm': ['kmeans++', 'forgy'], 'metric': ['euclidean'], 'n_clusters': [2]}
     kmeans = (kmeans_type, kmeans_params)
 
     kmedoids_type = 'sktime.clustering.k_medoids.TimeSeriesKMedoids'
-    kmedoids_params = {'init_algorithm': ['forgy', 'random'], 'metric': ['euclidean', 'dtw'], 'n_clusters': [2]}
+    kmedoids_params = {'init_algorithm': ['forgy', 'random'], 'metric': ['euclidean'], 'n_clusters': [2]}
     kmedoids = (kmedoids_type, kmedoids_params)
 
     boss_type = 'sktime.classification.dictionary_based._boss.BOSSEnsemble'
@@ -28,29 +28,30 @@ def train_select_classifiers(data_folder, save_folder, subjects_indexes, l_windo
     shapedtw_params =  {'shape_descriptor_function': ['raw', 'paa']}
     shapedtw = (shapedtw_type, shapedtw_params)
 
-    l_gridsearch_specs =    [kmeans, kmedoids, boss, shapedtw]          # [kmeans, kmedoids, boss, shapedtw]
+    l_gridsearch_specs =    [kmeans, kmedoids]          # [kmeans, kmedoids, boss, shapedtw]
 
     estimators_l = []
     best_estimators_l = []
 
-    for method, window_size, gridsearch_specs in itertools.product(l_method, l_window_size, l_gridsearch_specs):
+    for method, window_size, gridsearch_specs, decimation_factor in itertools.product(l_method, l_window_size, l_gridsearch_specs, l_decimation_factor):
 
         model_type, model_params = gridsearch_specs
 
         gridsearch_hash = hashlib.sha256(json.dumps(model_params, sort_keys=True).encode()).hexdigest()[:10]
 
-        print('Method: ', method, '\nWindow size: ', window_size, '\nModel type: ', model_type, '\nGrid search params: ', model_params)
+        print('Method: ', method, '\nWindow size: ', window_size, '\nModel type: ', model_type, '\nDecimation factor: ', decimation_factor, '\nGrid search params: ', model_params)
 
-        gridsearch_folder = save_folder + "Trained_models/" + method + "/" + str(window_size) + "_points/" + model_type.split(".")[-1] + "/" + "gridsearch_" + gridsearch_hash + "/"
+        gridsearch_folder = save_folder + "Trained_models/" + method + "/" + str(window_size) + "_points/" + str(decimation_factor) + "_decimation_factor/" + model_type.split(".")[-1] + "/" + "gridsearch_" + gridsearch_hash + "/"
 
         if not(os.path.exists(gridsearch_folder + "best_estimator.zip")) or not(os.path.exists(gridsearch_folder + 'GridSearchCV_stats/cv_results.csv')):
 
-            train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_type, model_params, method, window_size)
+            train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_type, model_params, method, window_size, decimation_factor)
 
         cv_results = pd.read_csv(gridsearch_folder + 'GridSearchCV_stats/cv_results.csv', index_col=0)
         cv_results.columns = cv_results.columns.str.strip()
         cv_results['method'] = method
         cv_results['window_size'] = window_size
+        cv_results['decimation_factor'] = decimation_factor
         cv_results['model_type'] = model_type.split(".")[-1]
         cv_results['gridsearch_hash'] = gridsearch_hash
 

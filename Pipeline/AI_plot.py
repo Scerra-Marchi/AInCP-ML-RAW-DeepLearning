@@ -8,7 +8,7 @@ import numpy as np
 import math
 
 def calculate_ENMO(data_folder, patient, ds_freq):
-    df = pd.read_csv(data_folder + 'data/week/' + str(patient) + '_week_RAW.csv')
+    df = pd.read_csv(data_folder + 'week/' + str(patient) + '_week_RAW.csv')
     df = decimate_df(df, 3) # Decimazione delle time series a 26.67Hz
     magnitude_D = np.sqrt(np.square(np.array(df['x_D'])) + np.square(np.array(df['y_D'])) + np.square(np.array(df['z_D'])))
     magnitude_ND = np.sqrt(np.square(np.array(df['x_ND'])) + np.square(np.array(df['y_ND'])) + np.square(np.array(df['z_ND'])))
@@ -27,7 +27,7 @@ def calculate_ENMO(data_folder, patient, ds_freq):
 
 def plot_AI_raw(data_folder, save_folder, indexes):
 
-    metadata = pd.read_excel(data_folder + 'metadata2022_04.xlsx').iloc[indexes]
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[indexes]
     metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True)
 
     timestamps = jl.load('timestamps_list_1sec') 
