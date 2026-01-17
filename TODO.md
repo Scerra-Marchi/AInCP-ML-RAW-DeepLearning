@@ -58,3 +58,28 @@ Sessioni:
 
 Conferenza
 - Articolo pipeline -> Possiamo portare explainability (?)
+
+---
+- timeseries
+
+Provati solo sui classificatori:
+- decimate_factor
+- window_size
+
+Per tutta la pipeline:
+- metodo di elaborazione (al posto di concat, difference, ai):
+    - 2d with ENMO
+    - 2d magnitude
+    - 6d raw
+---
+
+1. Fare debug version deterministica
+2. Miglioramenti qualitativi:
+    - predict_samples deve usare create_windows (1 sola volta per elaborazione, e NON usa volta per modello)
+    - create_windows chunckare con 1 chiamata a funzione (no for riga 54)
+    - elaborate_magnitude interna a create_windows e in grado di applicare calcoli parallelamente (map?)
+3. Aggiungere modelli DeepL (senza usare getattr(importlib.import_module)): pytorch wrapped in skorch (cnn-1D, gru)
+4. Aggiungere supporto a GPU (?)
+5. Testare sui dati RAW monodimensionali (comparare con Anna e fare meeting con Prencipe)
+6. Aggiungere dati multidimensionali
+7. Fare explainability del regressore (Vedi disegno su discord)
