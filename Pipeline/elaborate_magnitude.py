@@ -1,16 +1,29 @@
 import numpy as np
 
 def elaborate_magnitude(operation_type, magnitude_D, magnitude_ND):
+    """
+    magnitude_D, magnitude_ND: shape (n_windows, WINDOW_SIZE)
+    """
 
     if operation_type == 'concat':
-        elaborated_magnitude = np.concatenate((magnitude_D, magnitude_ND))
-    elif operation_type == 'difference':
-        elaborated_magnitude = magnitude_D - magnitude_ND
-    elif operation_type == 'ai':
-        mask = (magnitude_D + magnitude_ND) != 0
-        elaborated_magnitude = np.divide((magnitude_D - magnitude_ND), (magnitude_D + magnitude_ND), where=mask, out=np.zeros_like(magnitude_D)) * 100
-    else: 
-        print('operation type non supportata.')
-        exit(1)
+        # output shape: (n_windows, 2 * WINDOW_SIZE)
+        return np.concatenate((magnitude_D, magnitude_ND), axis=1)
 
-    return elaborated_magnitude
+    elif operation_type == 'difference':
+        # shape: (n_windows, WINDOW_SIZE)
+        return magnitude_D - magnitude_ND
+
+    elif operation_type == 'ai':
+        denom = magnitude_D + magnitude_ND
+        out = np.zeros_like(magnitude_D)
+        mask = denom != 0
+        np.divide(
+            magnitude_D - magnitude_ND,
+            denom,
+            where=mask,
+            out=out
+        )
+        return out * 100
+
+    else:
+        raise ValueError("operation type non supportata")
