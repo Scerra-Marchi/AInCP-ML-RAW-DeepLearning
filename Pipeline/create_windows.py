@@ -25,6 +25,8 @@ def decimate_df(data, factor):
 
 def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, decimation_factor):
 
+    import time
+    start = time.perf_counter()
     series = []
     y_AHA = []
     y_MACS = []
@@ -76,6 +78,9 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
         y_MACS.extend([metadata.loc[index, 'MACS']] * n_windows)
         y.extend([metadata.loc[index, 'hemi'] - 1] * n_windows)
 
+    end = time.perf_counter()
+    print(f"ELAPSED TIME FOR CREATE_WINDOWS                                                        : {end - start:.4f} s")
+    
     return (
         np.vstack(series),
         np.array(y_AHA),
