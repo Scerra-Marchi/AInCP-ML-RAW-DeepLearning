@@ -1,47 +1,65 @@
 import os
 import json
-import importlib
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import GridSearchCV
-from sktime.classification.base import BaseClassifier
-from sktime.clustering.base import BaseClusterer
+import numpy as np
+from sklearn.base import clone, is_classifier
 from sklearn.metrics import f1_score
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
 import sys
+from estimator_io import save_best_estimator
 
 import warnings
 warnings.filterwarnings("ignore")   #TODO: remove this line when the code is stable
 
-def scorer_f(estimator, X_train, Y_train):
-    y_pred = estimator.predict(X_train)
-    if issubclass(type(estimator), BaseClassifier):
-        return f1_score(Y_train, y_pred, average='weighted')
-    else:
-        inverted_y_pred = [1 if item == 0 else 0 for item in y_pred]
-        return max(f1_score(Y_train, y_pred, average='weighted'),f1_score(Y_train, inverted_y_pred, average='weighted'))
+def _best_hemi_cluster_from_predictions(y_true: np.ndarray, y_pred_labels: np.ndarray) -> int:
+    labels = np.unique(y_pred_labels)
+    if labels.size != 2:
+        raise ValueError(f"Expected 2 clusters/classes, got labels={labels.tolist()}")
 
-def train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_type, model_params, method, window_size, decimation_factor):
+    best_label = int(labels[0])
+    best_score = -1.0
+    for candidate in labels:
+        y_pred_bin = (y_pred_labels == candidate).astype(int)
+        score = f1_score(y_true, y_pred_bin, average="weighted")
+        if score > best_score:
+            best_score = float(score)
+            best_label = int(candidate)
+    return best_label
 
-    # Split the string into the module and class names
-    module_name, class_name = model_type.rsplit(".", 1)
-    model = getattr(importlib.import_module(module_name), class_name)()
+
+def scorer_f(estimator, X, y):
+    y_pred = estimator.predict(X)
+    if is_classifier(estimator):
+        return f1_score(y, y_pred, average="weighted")
+    hemi_cluster = _best_hemi_cluster_from_predictions(np.asarray(y), np.asarray(y_pred))
+    y_pred_bin = (np.asarray(y_pred) == hemi_cluster).astype(int)
+    return f1_score(y, y_pred_bin, average="weighted")
+
+def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
+    model = clone(estimator)
 
     X, _, _, y = create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor)
  
-    param_grid = model_params
     #                                                             dobbiamo fixare il seed? FATTP
-    parameter_tuning_method = GridSearchCV(model, param_grid, cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42), n_jobs=-1, return_train_score=True, verbose=3, scoring=scorer_f)
+    n_jobs = 1 if model.__class__.__module__.startswith("skorch.") else -1
+    parameter_tuning_method = GridSearchCV(
+        model,
+        param_grid,
+        cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+        n_jobs=n_jobs,
+        return_train_score=True,
+        verbose=3,
+        scoring=scorer_f,
+    )
     parameter_tuning_method.fit(X, y)
 
     estimator = parameter_tuning_method.best_estimator_
 
     hemi_cluster = 1
-    y_pred = estimator.predict(X)
-    inverted_y_pred = [1 if item == 0 else 0 for item in y_pred]
-
-    if issubclass(type(estimator), BaseClusterer) and f1_score(y, y_pred, average='weighted') < f1_score(y, inverted_y_pred, average='weighted'):
-        hemi_cluster = 0
+    if not is_classifier(estimator):
+        y_pred_labels = estimator.predict(X)
+        hemi_cluster = _best_hemi_cluster_from_predictions(np.asarray(y), np.asarray(y_pred_labels))
 
     # print('y = ', y)
     # print('y_pred = ', y_pred)
@@ -54,9 +72,20 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_typ
     pd.DataFrame(parameter_tuning_method.cv_results_).to_csv(stats_folder + "cv_results.csv")
     
     with open(stats_folder + 'best_estimator_stats.json', 'w') as f:
-        f.write(json.dumps({"Best index":int(parameter_tuning_method.best_index_), "Best score":parameter_tuning_method.best_score_, "Refit time":parameter_tuning_method.refit_time_, "Best params": parameter_tuning_method.best_params_, "Hemi cluster": hemi_cluster}, indent=4))
+        f.write(
+            json.dumps(
+                {
+                    "Best index": int(parameter_tuning_method.best_index_),
+                    "Best score": float(parameter_tuning_method.best_score_),
+                    "Refit time": float(parameter_tuning_method.refit_time_),
+                    "Best params": parameter_tuning_method.best_params_,
+                    "Hemi cluster": int(hemi_cluster),
+                },
+                indent=4,
+            )
+        )
 
-    estimator.save(gridsearch_folder + "best_estimator")
+    save_best_estimator(gridsearch_folder, estimator)
     print('Best estimator saved\n\n------------------------------------------------\n')
     sys.stdout.flush()
     sys.stderr.flush()

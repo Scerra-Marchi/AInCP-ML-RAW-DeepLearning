@@ -4,9 +4,9 @@ import json
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sktime.base import BaseEstimator
 from sklearn.metrics import r2_score
 from predict_samples import predict_samples
+from estimator_io import load_best_estimator
 
 def test_best_classifier(data_folder, save_folder, subjects_indexes):
 
@@ -21,14 +21,32 @@ def test_best_classifier(data_folder, save_folder, subjects_indexes):
     model_params_concat = ''
 
     #for estimators_specs in estimators_specs_list:
-    estimator_dir = save_folder + "Trained_models/" + best_classifier['method'] + "/" + str(best_classifier['window_size']) + "_points/" + best_classifier['model_type'].split(".")[-1] + "/gridsearch_" + best_classifier['gridsearch_hash']  + "/"
+    estimator_dir = (
+        save_folder
+        + "Trained_models/"
+        + best_classifier["method"]
+        + "/"
+        + str(best_classifier["window_size"])
+        + "_points/"
+        + str(best_classifier.get("decimation_factor", 3))
+        + "_decimation_factor/"
+        + best_classifier["model_type"].split(".")[-1]
+        + "/gridsearch_"
+        + best_classifier["gridsearch_hash"]
+        + "/"
+    )
 
-    with open(estimator_dir + 'GridSearchCV_stats/best_estimator_stats.json', "r") as stats_f:
-        grid_search_best_params = json.load(stats_f)
-
-    estimator = BaseEstimator().load_from_path(estimator_dir + 'best_estimator.zip')
-    estimators_list.append({'estimator': estimator, 'method': best_classifier['method'], 'window_size': best_classifier['window_size'], 'hemi_cluster': grid_search_best_params['Hemi cluster']})
-    print('Loaded -> ', estimator_dir + 'best_estimator.zip')
+    estimator, hemi_cluster = load_best_estimator(estimator_dir)
+    estimators_list.append(
+        {
+            "estimator": estimator,
+            "method": best_classifier["method"],
+            "window_size": best_classifier["window_size"],
+            "decimation_factor": best_classifier.get("decimation_factor", 3),
+            "hemi_cluster": hemi_cluster,
+        }
+    )
+    print("Loaded -> ", estimator_dir + "best_estimator.joblib")
     model_params_concat = model_params_concat + str(estimator.get_params())
 
     #reg_path = 'Regressors/regressor_'+ (hashlib.sha256((model_params_concat).encode()).hexdigest()[:10])

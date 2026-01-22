@@ -2,7 +2,6 @@ import hashlib
 import os
 import json
 import pandas as pd
-from sktime.base import BaseEstimator
 from train_regressor import train_regressor
 import joblib as jl
 import numpy as np
@@ -13,6 +12,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import RepeatedKFold
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
+from estimator_io import load_best_estimator
 
 def test_regressor(data_folder, save_folder, train_indexes, test_indexes, mean_test_score, window_size):
 
@@ -33,14 +33,32 @@ def test_regressor(data_folder, save_folder, train_indexes, test_indexes, mean_t
     model_id_concat = ''
 
     for estimators_specs in estimators_specs_list:
-        estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
+        estimator_dir = (
+            save_folder
+            + "Trained_models/"
+            + estimators_specs["method"]
+            + "/"
+            + str(estimators_specs["window_size"])
+            + "_points/"
+            + str(estimators_specs.get("decimation_factor", 3))
+            + "_decimation_factor/"
+            + estimators_specs["model_type"].split(".")[-1]
+            + "/gridsearch_"
+            + estimators_specs["gridsearch_hash"]
+            + "/"
+        )
 
-        with open(estimator_dir + 'GridSearchCV_stats/best_estimator_stats.json', "r") as stats_f:
-            grid_search_best_params = json.load(stats_f)
-
-        estimator = BaseEstimator().load_from_path(estimator_dir + 'best_estimator.zip')
-        estimators_list.append({'estimator': estimator, 'method': estimators_specs['method'], 'window_size': estimators_specs['window_size'], 'hemi_cluster': grid_search_best_params['Hemi cluster']})
-        print('Loaded -> ', estimator_dir + 'best_estimator.zip')
+        estimator, hemi_cluster = load_best_estimator(estimator_dir)
+        estimators_list.append(
+            {
+                "estimator": estimator,
+                "method": estimators_specs["method"],
+                "window_size": estimators_specs["window_size"],
+                "decimation_factor": estimators_specs.get("decimation_factor", 3),
+                "hemi_cluster": hemi_cluster,
+            }
+        )
+        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
         model_id_concat = model_id_concat + estimator_dir
 
     print('Loaded estimators: ',len(estimators_list))
