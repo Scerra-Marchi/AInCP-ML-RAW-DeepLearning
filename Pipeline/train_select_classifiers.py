@@ -9,6 +9,15 @@ from estimator_io import BEST_ESTIMATOR_FILENAME
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+import torch
+from torch import nn
+from skorch import NeuralNetClassifier
+from torch_skorch import (
+    Conv1DSequenceClassifier,
+    GRUSequenceClassifier,
+    LSTMSequenceClassifier,
+    RNNSequenceClassifier,
+)
 
 #import warnings 
 
@@ -34,6 +43,19 @@ def train_select_classifiers(
 ):
 
     if gridsearch_specs_list is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        skorch_common = {
+            "criterion": nn.CrossEntropyLoss,
+            "max_epochs": 5,
+            "lr": 1e-3,
+            "batch_size": 64,
+            "iterator_train__shuffle": True,
+            "train_split": None,
+            "device": device,
+            "random_state": 42,
+            "verbose": 0,
+        }
+
         gridsearch_specs_list = [
             {
                 "name": "KMeans",
@@ -50,22 +72,40 @@ def train_select_classifiers(
                 "estimator": RandomForestClassifier(random_state=42, class_weight="balanced"),
                 "param_grid": {"n_estimators": [200, 500], "max_depth": [None, 8, 16]},
             },
+            {
+                "name": "LSTM",
+                "estimator": NeuralNetClassifier(module=LSTMSequenceClassifier, **skorch_common),
+                "param_grid": {
+                    "lr": [1e-3],
+                    "module__hidden_size": [16],
+                },
+            },
+            {
+                "name": "GRU",
+                "estimator": NeuralNetClassifier(module=GRUSequenceClassifier, **skorch_common),
+                "param_grid": {
+                    "lr": [1e-3],
+                    "module__hidden_size": [16],
+                },
+            },
+            {
+                "name": "RNN",
+                "estimator": NeuralNetClassifier(module=RNNSequenceClassifier, **skorch_common),
+                "param_grid": {
+                    "lr": [1e-3],
+                    "module__hidden_size": [16],
+                },
+            },
+            {
+                "name": "CNN1D",
+                "estimator": NeuralNetClassifier(module=Conv1DSequenceClassifier, **skorch_common),
+                "param_grid": {
+                    "lr": [1e-3],
+                    "module__channels": [16],
+                    "module__kernel_size": [5],
+                },
+            },
         ]
-        # To try a PyTorch LSTM with sklearn GridSearchCV (via skorch), pass an explicit
-        # `gridsearch_specs_list` from your entrypoint and include something like:
-        #   from skorch import NeuralNetClassifier
-        #   from torch import nn
-        #   from torch_skorch import LSTMSequenceClassifier
-        #   lstm = NeuralNetClassifier(
-        #       module=LSTMSequenceClassifier,
-        #       criterion=nn.CrossEntropyLoss,
-        #       max_epochs=20,
-        #       lr=1e-3,
-        #       batch_size=64,
-        #       iterator_train__shuffle=True,
-        #       device="cpu",
-        #   )
-        #   {"name": "LSTM", "estimator": lstm, "param_grid": {"lr": [1e-3], "module__hidden_size": [64, 128]}}
 
     estimators_l = []
     best_estimators_l = []
