@@ -71,8 +71,6 @@ if not os.path.exists(save_folder):
         l_decimation_factor=l_decimation_factor
     )
     
-exit(0)
-
 if not os.path.exists(save_folder + 'Regressors/'):
 
     print(' ----- TRAINING REGRESSOR ----- ')

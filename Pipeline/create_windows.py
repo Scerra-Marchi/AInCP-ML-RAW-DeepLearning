@@ -23,7 +23,7 @@ def decimate_df(data, factor):
     return pd.concat([timestamps, df_decimated], axis=1)
 
 
-def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, decimation_factor):
+def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, decimation_factor, input_type='AHA', return_mag=0):
 
     import time
     start = time.perf_counter()
@@ -31,6 +31,8 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
     y_AHA = []
     y_MACS = []
     y = []
+    mag_D = np.array([])
+    mag_ND = np.array([])
 
     metadata = pd.read_excel(
         data_folder + 'metadata2023_08.xlsx'
@@ -39,7 +41,7 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
     for index in range(metadata.shape[0]):
 
         subject = metadata.loc[index, 'subject']
-        df = pd.read_csv(f"{data_folder}AHA/{subject}_AHA_RAW.csv")
+        df = pd.read_csv(f"{data_folder}{input_type}/{subject}_{input_type}_RAW.csv")
 
         df = decimate_df(df, decimation_factor)
 
@@ -59,6 +61,10 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
 
         magnitude_D = np.linalg.norm(D, axis=1)
         magnitude_ND = np.linalg.norm(ND, axis=1)
+        
+        if(return_mag):
+            mag_D = np.copy(magnitude_D)
+            mag_ND = np.copy(magnitude_ND)
 
         # === Chunking vettoriale ===
         n_windows = len(magnitude_D) // WINDOW_SIZE
@@ -86,5 +92,7 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
         np.vstack(series),
         np.array(y_AHA),
         np.array(y_MACS),
-        np.array(y)
+        np.array(y),
+        mag_D,
+        mag_ND
     )

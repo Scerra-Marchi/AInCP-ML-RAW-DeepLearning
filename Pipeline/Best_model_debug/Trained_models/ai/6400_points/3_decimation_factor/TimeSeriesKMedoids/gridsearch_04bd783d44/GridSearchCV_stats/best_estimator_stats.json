@@ -1,9 +1,9 @@
 {
-    "Best index": 0,
-    "Best score": 0.5333333333333333,
-    "Refit time": 0.009027242660522461,
+    "Best index": 1,
+    "Best score": 0.5952021845164202,
+    "Refit time": 0.3204030990600586,
     "Best params": {
-        "init_algorithm": "forgy",
+        "init_algorithm": "random",
         "metric": "euclidean",
         "n_clusters": 2
     },

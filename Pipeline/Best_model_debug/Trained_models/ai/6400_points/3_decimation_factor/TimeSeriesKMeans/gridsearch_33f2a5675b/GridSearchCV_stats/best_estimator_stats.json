@@ -1,7 +1,7 @@
 {
     "Best index": 0,
-    "Best score": 0.5333333333333333,
-    "Refit time": 0.704479455947876,
+    "Best score": 0.4808756025122937,
+    "Refit time": 0.4757659435272217,
     "Best params": {
         "averaging_method": "mean",
         "init_algorithm": "kmeans++",
