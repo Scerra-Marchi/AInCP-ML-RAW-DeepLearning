@@ -49,8 +49,9 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
                 ignore_index=True
             )
 
-        scart = (len(df) % WINDOW_SIZE) // 2
-        df_cut = df.iloc[scart:len(df) - scart]
+        usable_len = (len(df) // WINDOW_SIZE) * WINDOW_SIZE
+        df_cut = df.iloc[:usable_len]
+
 
         # === Magnitude computation (vectorized) ===
         D = df_cut[['x_D', 'y_D', 'z_D']].to_numpy()
