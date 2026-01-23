@@ -14,6 +14,8 @@ from torch_skorch import (
     GRUSequenceClassifier,
     LSTMSequenceClassifier,
     RNNSequenceClassifier,
+    ReservoirSequenceClassifier,
+    TransformerSequenceClassifier,
 )
 
 #import warnings 
@@ -85,6 +87,32 @@ def train_select_classifiers(
                     "lr": [1e-3],
                     "module__channels": [16],
                     "module__kernel_size": [5],
+                },
+            },
+            {
+                "name": "Transformer",
+                "estimator": NeuralNetClassifier(
+                    module=TransformerSequenceClassifier,
+                    **{**skorch_common, "max_epochs": 3, "batch_size": 32},
+                ),
+                "param_grid": {
+                    "lr": [1e-3],
+                    "module__d_model": [32],
+                    "module__nhead": [4],
+                    "module__num_layers": [2],
+                    "module__patch_size": [32],
+                },
+            },
+            {
+                "name": "Reservoir",
+                "estimator": NeuralNetClassifier(
+                    module=ReservoirSequenceClassifier,
+                    **{**skorch_common, "max_epochs": 3, "batch_size": 64},
+                ),
+                "param_grid": {
+                    "lr": [1e-3],
+                    "module__reservoir_size": [200],
+                    "module__downsample": [16],
                 },
             },
         ]
