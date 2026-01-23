@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from elaborate_magnitude import elaborate_magnitude
 from create_windows import decimate_df
-
 def predict_samples(data_folder, estimators, patient):
 
     if not estimators:
@@ -45,7 +44,8 @@ def predict_samples(data_folder, estimators, patient):
     # Fase di predizione
     for es in estimators:
         #print(np.array(es['series']).shape)
-        y = es['estimator'].predict(np.array(es['series']))
+        X_pred = np.array(es["series"])
+        y = es['estimator'].predict(X_pred)
         #print(es['method'])
 
         for index in to_discard:

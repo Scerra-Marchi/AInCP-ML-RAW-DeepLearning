@@ -36,16 +36,33 @@ def scorer_f(estimator, X, y):
     y_pred_bin = (np.asarray(y_pred) == hemi_cluster).astype(int)
     return f1_score(y, y_pred_bin, average="weighted")
 
-def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
+def _is_skorch_estimator(estimator) -> bool:
+    return estimator.__class__.__module__.startswith("skorch.")
+
+
+def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor) -> bool:
     model = clone(estimator)
 
     X, _, _, y = create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor)
+    X = np.asarray(X)
+    y = np.asarray(y)
+
+    is_skorch = _is_skorch_estimator(model)
+
+    effective_param_grid = dict(param_grid)
+    if is_skorch:
+        n_features = int(X.shape[-1]) if X.ndim == 3 else 1
+        model_params = model.get_params(deep=True)
+        if "module__input_size" in model_params and "module__input_size" not in effective_param_grid:
+            effective_param_grid["module__input_size"] = [n_features]
+        if "module__in_channels" in model_params and "module__in_channels" not in effective_param_grid:
+            effective_param_grid["module__in_channels"] = [n_features]
  
     #                                                             dobbiamo fixare il seed? FATTP
-    n_jobs = 1 if model.__class__.__module__.startswith("skorch.") else -1
+    n_jobs = 1 if is_skorch else -1
     parameter_tuning_method = GridSearchCV(
         model,
-        param_grid,
+        effective_param_grid,
         cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
         n_jobs=n_jobs,
         return_train_score=True,
@@ -89,3 +106,4 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
     print('Best estimator saved\n\n------------------------------------------------\n')
     sys.stdout.flush()
     sys.stderr.flush()
+    return True

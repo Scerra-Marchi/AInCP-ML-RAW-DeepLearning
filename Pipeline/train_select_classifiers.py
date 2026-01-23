@@ -6,9 +6,6 @@ import pandas as pd
 from train_best_model import train_best_model
 from estimator_io import BEST_ESTIMATOR_FILENAME
 
-from sklearn.cluster import KMeans
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
 import torch
 from torch import nn
 from skorch import NeuralNetClassifier
@@ -57,21 +54,6 @@ def train_select_classifiers(
         }
 
         gridsearch_specs_list = [
-            {
-                "name": "KMeans",
-                "estimator": KMeans(n_clusters=2, random_state=42, n_init="auto"),
-                "param_grid": {"init": ["k-means++", "random"]},
-            },
-            {
-                "name": "LogisticRegression",
-                "estimator": LogisticRegression(max_iter=3000, class_weight="balanced", solver="liblinear"),
-                "param_grid": {"C": [0.1, 1.0, 10.0]},
-            },
-            {
-                "name": "RandomForestClassifier",
-                "estimator": RandomForestClassifier(random_state=42, class_weight="balanced"),
-                "param_grid": {"n_estimators": [200, 500], "max_depth": [None, 8, 16]},
-            },
             {
                 "name": "LSTM",
                 "estimator": NeuralNetClassifier(module=LSTMSequenceClassifier, **skorch_common),
@@ -153,7 +135,7 @@ def train_select_classifiers(
             os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv")
         ):
 
-            train_best_model(
+            trained = train_best_model(
                 data_folder,
                 subjects_indexes,
                 gridsearch_folder,
@@ -163,6 +145,11 @@ def train_select_classifiers(
                 window_size,
                 decimation_factor,
             )
+            if not trained:
+                continue
+
+        if not os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv"):
+            continue
 
         cv_results = pd.read_csv(gridsearch_folder + 'GridSearchCV_stats/cv_results.csv', index_col=0)
         cv_results.columns = cv_results.columns.str.strip()
@@ -174,6 +161,10 @@ def train_select_classifiers(
 
         estimators_l.append(cv_results)
         best_estimators_l.append(cv_results.iloc[[cv_results['rank_test_score'].argmin()]])
+
+    if not estimators_l:
+        print("No compatible estimators were trained for the selected methods/window sizes.")
+        return
 
     estimators_df = pd.concat(estimators_l, ignore_index=True)
     best_estimators_df = pd.concat(best_estimators_l, ignore_index=True)
