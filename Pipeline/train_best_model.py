@@ -7,7 +7,7 @@ from sklearn.metrics import f1_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
 import sys
-from estimator_io import save_best_estimator
+from skorch_models import save_best_estimator
 
 import warnings
 warnings.filterwarnings("ignore")   #TODO: remove this line when the code is stable

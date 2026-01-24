@@ -4,12 +4,12 @@ import hashlib
 import itertools
 import pandas as pd
 from train_best_model import train_best_model
-from estimator_io import BEST_ESTIMATOR_FILENAME
+from skorch_models import BEST_ESTIMATOR_FILENAME
 
 import torch
 from torch import nn
 from skorch import NeuralNetClassifier
-from torch_skorch import (
+from skorch_models import (
     Conv1DSequenceClassifier,
     GRUSequenceClassifier,
     LSTMSequenceClassifier,

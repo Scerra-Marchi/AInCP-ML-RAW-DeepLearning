@@ -10,7 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import hashlib
 import math
-from estimator_io import load_best_estimator
+from skorch_models import load_best_estimator
 #import warnings 
 
 

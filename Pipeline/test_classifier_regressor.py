@@ -9,7 +9,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import RepeatedKFold
 from predict_samples import predict_samples
 from sklearn.model_selection import cross_val_score
-from estimator_io import load_best_estimator
+from skorch_models import load_best_estimator
 
 def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_test_score, window_size, decimation_factor):
 

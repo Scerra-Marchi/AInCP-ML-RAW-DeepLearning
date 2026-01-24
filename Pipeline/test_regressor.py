@@ -12,7 +12,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import RepeatedKFold
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
-from estimator_io import load_best_estimator
+from skorch_models import load_best_estimator
 
 def test_regressor(data_folder, save_folder, train_indexes, test_indexes, mean_test_score, window_size):
 

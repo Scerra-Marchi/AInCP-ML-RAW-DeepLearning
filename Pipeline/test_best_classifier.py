@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from predict_samples import predict_samples
-from estimator_io import load_best_estimator
+from skorch_models import load_best_estimator
 
 def test_best_classifier(data_folder, save_folder, subjects_indexes):
 

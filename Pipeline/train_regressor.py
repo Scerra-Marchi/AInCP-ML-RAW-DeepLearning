@@ -6,7 +6,7 @@ from sklearn.linear_model import LinearRegression
 from predict_samples import predict_samples
 import os
 import sys
-from estimator_io import load_best_estimator
+from skorch_models import load_best_estimator
 
 def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score, window_size, decimation_factor):
 
