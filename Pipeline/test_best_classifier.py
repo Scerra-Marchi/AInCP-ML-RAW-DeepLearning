@@ -4,9 +4,9 @@ import json
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import joblib as jl
 from sklearn.metrics import r2_score
 from predict_samples import predict_samples
-from skorch_models import load_best_estimator
 
 def test_best_classifier(data_folder, save_folder, subjects_indexes):
 
@@ -36,14 +36,13 @@ def test_best_classifier(data_folder, save_folder, subjects_indexes):
         + "/"
     )
 
-    estimator, hemi_cluster = load_best_estimator(estimator_dir)
+    estimator = jl.load(estimator_dir + "best_estimator.joblib")
     estimators_list.append(
         {
             "estimator": estimator,
             "method": best_classifier["method"],
             "window_size": best_classifier["window_size"],
             "decimation_factor": best_classifier.get("decimation_factor", 3),
-            "hemi_cluster": hemi_cluster,
         }
     )
     print("Loaded -> ", estimator_dir + "best_estimator.joblib")

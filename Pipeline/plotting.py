@@ -10,7 +10,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import hashlib
 import math
-from skorch_models import load_best_estimator
 #import warnings 
 
 
@@ -57,14 +56,13 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
         
         print("Loading -> ", estimator_dir + "best_estimator.joblib")
-        estimator, hemi_cluster = load_best_estimator(estimator_dir)
+        estimator = jl.load(estimator_dir + "best_estimator.joblib")
         estimators_list.append(
             {
                 "estimator": estimator,
                 "method": estimators_specs["method"],
                 "window_size": estimators_specs["window_size"],
                 "decimation_factor": estimators_specs["decimation_factor"],
-                "hemi_cluster": hemi_cluster,
             }
         )
         print("Loaded -> ", estimator_dir + "best_estimator.joblib")

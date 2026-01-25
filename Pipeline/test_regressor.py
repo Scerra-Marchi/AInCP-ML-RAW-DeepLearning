@@ -12,7 +12,6 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import RepeatedKFold
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
-from skorch_models import load_best_estimator
 
 def test_regressor(data_folder, save_folder, train_indexes, test_indexes, mean_test_score, window_size):
 
@@ -48,14 +47,13 @@ def test_regressor(data_folder, save_folder, train_indexes, test_indexes, mean_t
             + "/"
         )
 
-        estimator, hemi_cluster = load_best_estimator(estimator_dir)
+        estimator = jl.load(estimator_dir + "best_estimator.joblib")
         estimators_list.append(
             {
                 "estimator": estimator,
                 "method": estimators_specs["method"],
                 "window_size": estimators_specs["window_size"],
                 "decimation_factor": estimators_specs.get("decimation_factor", 3),
-                "hemi_cluster": hemi_cluster,
             }
         )
         print("Loaded -> ", estimator_dir + "best_estimator.joblib")

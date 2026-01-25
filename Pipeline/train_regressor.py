@@ -6,7 +6,6 @@ from sklearn.linear_model import LinearRegression
 from predict_samples import predict_samples
 import os
 import sys
-from skorch_models import load_best_estimator
 
 def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score, window_size, decimation_factor):
 
@@ -25,14 +24,13 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
     for estimators_specs in estimators_specs_list:
         estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
 
-        estimator, hemi_cluster = load_best_estimator(estimator_dir)
+        estimator = jl.load(estimator_dir + "best_estimator.joblib")
         estimators_list.append(
             {
                 "estimator": estimator,
                 "method": estimators_specs["method"],
                 "window_size": estimators_specs["window_size"],
                 "decimation_factor": estimators_specs["decimation_factor"],
-                "hemi_cluster": hemi_cluster,
             }
         )
         print("Loaded -> ", estimator_dir + "best_estimator.joblib")

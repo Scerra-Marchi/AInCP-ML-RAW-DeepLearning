@@ -4,7 +4,6 @@ import hashlib
 import itertools
 import pandas as pd
 from train_best_model import train_best_model
-from skorch_models import BEST_ESTIMATOR_FILENAME
 
 import torch
 from torch import nn
@@ -159,11 +158,11 @@ def train_select_classifiers(
             + "/"
         )
 
-        if not (os.path.exists(gridsearch_folder + BEST_ESTIMATOR_FILENAME)) or not (
+        if not (os.path.exists(gridsearch_folder + "best_estimator.joblib")) or not (
             os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv")
         ):
 
-            trained = train_best_model(
+            train_best_model(
                 data_folder,
                 subjects_indexes,
                 gridsearch_folder,
@@ -173,11 +172,6 @@ def train_select_classifiers(
                 window_size,
                 decimation_factor,
             )
-            if not trained:
-                continue
-
-        if not os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv"):
-            continue
 
         cv_results = pd.read_csv(gridsearch_folder + 'GridSearchCV_stats/cv_results.csv', index_col=0)
         cv_results.columns = cv_results.columns.str.strip()

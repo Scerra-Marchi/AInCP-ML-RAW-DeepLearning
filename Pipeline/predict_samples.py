@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from elaborate_magnitude import elaborate_magnitude
 from create_windows import decimate_df
+
 def predict_samples(data_folder, estimators, patient):
 
     if not estimators:
@@ -45,28 +46,19 @@ def predict_samples(data_folder, estimators, patient):
     for es in estimators:
         #print(np.array(es['series']).shape)
         X_pred = np.array(es["series"])
-        y = es['estimator'].predict(X_pred)
+        y_pred = es["estimator"].predict(X_pred)
         #print(es['method'])
 
         for index in to_discard:
-            y[index] = -1
+            y_pred[index] = -1
 
-        hemi_cluster = es['hemi_cluster']
+        cluster_healthy_samples = int(np.sum(y_pred == 0))     # Non emiplegici
+        cluster_hemiplegic_samples = int(np.sum(y_pred == 1))  # Emiplegici
 
-        cluster_healthy_samples = 0     # Non emiplegici
-        cluster_hemiplegic_samples = 0  # Emiplegici
-
-        for k in range(len(y)):
-            if y[k] == hemi_cluster:
-                cluster_hemiplegic_samples += 1
-                y[k] = -1
-            elif y[k] != -1:
-                cluster_healthy_samples += 1  
-                y[k] = 1
-            else:
-                y[k] = 0
-        
-        y_list.append(y)
+        y_mapped = np.zeros_like(y_pred, dtype=int)
+        y_mapped[y_pred == 0] = 1
+        y_mapped[y_pred == 1] = -1
+        y_list.append(y_mapped)
 
         # Calcolo del CPI
         hp_tot = np.nan
