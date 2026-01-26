@@ -45,28 +45,20 @@ def predict_samples(data_folder, estimators, patient):
     # Fase di predizione
     for es in estimators:
         #print(np.array(es['series']).shape)
-        y = es['estimator'].predict(np.array(es['series']))
+        X_pred = np.array(es["series"])
+        y_pred = es["estimator"].predict(X_pred)
         #print(es['method'])
 
         for index in to_discard:
-            y[index] = -1
+            y_pred[index] = -1
 
-        hemi_cluster = es['hemi_cluster']
+        cluster_healthy_samples = int(np.sum(y_pred == 0))     # Non emiplegici
+        cluster_hemiplegic_samples = int(np.sum(y_pred == 1))  # Emiplegici
 
-        cluster_healthy_samples = 0     # Non emiplegici
-        cluster_hemiplegic_samples = 0  # Emiplegici
-
-        for k in range(len(y)):
-            if y[k] == hemi_cluster:
-                cluster_hemiplegic_samples += 1
-                y[k] = -1
-            elif y[k] != -1:
-                cluster_healthy_samples += 1  
-                y[k] = 1
-            else:
-                y[k] = 0
-        
-        y_list.append(y)
+        y_mapped = np.zeros_like(y_pred, dtype=int)
+        y_mapped[y_pred == 0] = 1
+        y_mapped[y_pred == 1] = -1
+        y_list.append(y_mapped)
 
         # Calcolo del CPI
         hp_tot = np.nan

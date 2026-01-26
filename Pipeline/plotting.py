@@ -2,7 +2,6 @@ import os
 import json
 import pandas as pd
 from itertools import product
-from sktime.base import BaseEstimator
 import joblib as jl
 import numpy as np
 from predict_samples import predict_samples
@@ -11,6 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import hashlib
 import math
+from train_regressor import regressor_hash_from_estimators_specs
 #import warnings 
 
 
@@ -55,20 +55,24 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     
     for estimators_specs in estimators_specs_list:
         estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
-
-        with open(estimator_dir + 'GridSearchCV_stats/best_estimator_stats.json', "r") as stats_f:
-            grid_search_best_params = json.load(stats_f)
         
-        print('Loading -> ', estimator_dir + 'best_estimator.zip')
-        estimator = BaseEstimator().load_from_path(estimator_dir + 'best_estimator.zip')
-        estimators_list.append({'estimator': estimator, 'method': estimators_specs['method'], 'window_size': estimators_specs['window_size'], 'decimation_factor': estimators_specs['decimation_factor'], 'hemi_cluster': grid_search_best_params['Hemi cluster']})
-        print('Loaded -> ', estimator_dir + 'best_estimator.zip')
+        print("Loading -> ", estimator_dir + "best_estimator.joblib")
+        estimator = jl.load(estimator_dir + "best_estimator.joblib")
+        estimators_list.append(
+            {
+                "estimator": estimator,
+                "method": estimators_specs["method"],
+                "window_size": estimators_specs["window_size"],
+                "decimation_factor": estimators_specs["decimation_factor"],
+            }
+        )
+        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
         model_id_concat = model_id_concat + str(estimator.get_params())
 
     metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
     metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # 'age_aha', 'gender', 
 
-    reg_path = save_folder + 'Regressors/regressor_'+ (hashlib.sha256((model_id_concat).encode()).hexdigest()[:10])
+    reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     regressor = jl.load(reg_path)
 
     os.makedirs(stats_folder, exist_ok=True)
