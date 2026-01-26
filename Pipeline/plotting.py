@@ -10,6 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import hashlib
 import math
+from train_regressor import regressor_hash_from_estimators_specs
 #import warnings 
 
 
@@ -71,7 +72,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
     metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # 'age_aha', 'gender', 
 
-    reg_path = save_folder + 'Regressors/regressor_'+ (hashlib.sha256((model_id_concat).encode()).hexdigest()[:10])
+    reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     regressor = jl.load(reg_path)
 
     os.makedirs(stats_folder, exist_ok=True)

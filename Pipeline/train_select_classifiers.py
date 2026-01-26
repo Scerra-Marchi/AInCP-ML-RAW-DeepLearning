@@ -5,6 +5,7 @@ import itertools
 import pandas as pd
 from train_best_model import train_best_model
 
+import random
 import torch
 from torch import nn
 from skorch import NeuralNetClassifier
@@ -41,6 +42,12 @@ def train_select_classifiers(
 ):
 
     if gridsearch_specs_list is None:
+        seed = 42
+        random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         skorch_common = {
             "criterion": nn.CrossEntropyLoss,
@@ -50,7 +57,6 @@ def train_select_classifiers(
             "iterator_train__shuffle": True,
             "train_split": None,
             "device": device,
-            "random_state": 42,
             "verbose": 0,
         }
 

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import numpy as np
 import joblib as jl
 import pandas as pd
@@ -6,6 +7,23 @@ from sklearn.linear_model import LinearRegression
 from predict_samples import predict_samples
 import os
 import sys
+
+
+def regressor_hash_from_estimators_specs(estimators_specs_list) -> str:
+    specs = sorted(
+        [
+            (
+                str(r["method"]),
+                int(r["window_size"]),
+                int(r["decimation_factor"]),
+                str(r["model_type"]).split(".")[-1],
+                str(r["gridsearch_hash"]),
+            )
+            for r in estimators_specs_list
+        ]
+    )
+    return hashlib.sha256(json.dumps(specs, separators=(",", ":")).encode()).hexdigest()[:10]
+
 
 def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score, window_size, decimation_factor):
 
@@ -36,7 +54,7 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
         print("Loaded -> ", estimator_dir + "best_estimator.joblib")
         model_params_concat = model_params_concat + str(estimator.get_params())
 
-    reg_path = 'regressor_'+ (hashlib.sha256((model_params_concat).encode()).hexdigest()[:10])
+    reg_path = 'regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     os.makedirs(save_folder + 'Regressors/', exist_ok = True)
     reg_full_path = save_folder + 'Regressors/' + reg_path
     if os.path.exists(reg_full_path):

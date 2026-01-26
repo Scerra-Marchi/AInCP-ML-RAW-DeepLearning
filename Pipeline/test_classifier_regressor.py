@@ -9,6 +9,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import RepeatedKFold
 from predict_samples import predict_samples
 from sklearn.model_selection import cross_val_score
+from train_regressor import regressor_hash_from_estimators_specs
 
 def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_test_score, window_size, decimation_factor):
 
@@ -69,7 +70,7 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
         "Correlation Coefficient": np.corrcoef(np.array(hp_tot_list_list)[:, 0], y)[0, 1]
     }
 
-    reg_path = 'regressor_'+ (hashlib.sha256((model_params_concat).encode()).hexdigest()[:10])
+    reg_path = 'regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     #regressor = BaseEstimator().load_from_path(save_folder + 'Regressors/' + reg_path)
     regressor = jl.load(save_folder + 'Regressors/' + reg_path)
 
@@ -86,4 +87,4 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
 
     # Writing to a JSON file
     with open(save_folder + 'combined_test_stats.json', 'w') as file:
-        json.dump(data_test, file, indent=4)
+        json.dump(data_test, file, indent=4, default=str)
