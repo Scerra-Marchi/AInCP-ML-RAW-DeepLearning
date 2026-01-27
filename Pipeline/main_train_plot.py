@@ -37,10 +37,6 @@ if args.debug:
     rng = np.random.default_rng(42)
     train_idx = np.array(train_indexes, dtype=int)
     test_idx = np.array(test_indexes, dtype=int)
-    train_indexes = [x for x in train_indexes if not (60 <= x <= 79)]
-    test_indexes = [x for x in test_indexes if not (60 <= x <= 79)]
-    print(train_indexes)
-    print(test_indexes)
 
     train_labels = metadata['hemi'].iloc[train_idx].to_numpy()
     test_labels = metadata['hemi'].iloc[test_idx].to_numpy()
@@ -54,8 +50,8 @@ if args.debug:
             out.append(rng.choice(group, size=min(n_per_class, group.size), replace=False))
         return np.concatenate(out) if out else np.array([], dtype=int)
 
-    train_indexess = _subset(train_idx, train_labels, n_per_class=2)
-    test_indexess = _subset(test_idx, test_labels, n_per_class=1)
+    train_indexes = _subset(train_idx, train_labels, n_per_class=2)
+    test_indexes = _subset(test_idx, test_labels, n_per_class=1)
 
 
 if not os.path.exists(save_folder):

@@ -9,30 +9,32 @@ def decimate_df(data, factor):
     if factor <= 1:
         return data
 
-    df_axis = data[['x_D', 'y_D', 'z_D', 'x_ND', 'y_ND', 'z_ND']]
-
     df_decimated = pd.DataFrame(
-        decimate(df_axis, factor, axis=0, ftype='fir', zero_phase=True),
-        columns=df_axis.columns
+        decimate(data, factor, axis=0, ftype='fir', zero_phase=True),
+        columns=data.columns
     ).reset_index(drop=True)
 
-    timestamps = data[['datetime']].iloc[::factor].reset_index(drop=True)
-
-    assert len(df_decimated) == len(timestamps), "Mismatch after decimation"
-
-    return pd.concat([timestamps, df_decimated], axis=1)
+    return df_decimated
 
 
-def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, decimation_factor, input_type='AHA', return_mag=0):
+def create_windows(
+    data_folder,
+    subjects_indexes,
+    operation_type,
+    WINDOW_SIZE,
+    decimation_factor,
+    input_type='AHA',
+    return_mag=0
+):
 
-    import time
-    start = time.perf_counter()
     series = []
     y_AHA = []
     y_MACS = []
     y = []
     mag_D = np.array([])
     mag_ND = np.array([])
+    invalid_bitmap = []
+
 
     metadata = pd.read_excel(
         data_folder + 'metadata2023_08.xlsx'
@@ -41,7 +43,7 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
     for index in range(metadata.shape[0]):
 
         subject = metadata.loc[index, 'subject']
-        df = pd.read_csv(f"{data_folder}{input_type}/{subject}_{input_type}_RAW.csv")
+        df = pd.read_csv(f"{data_folder}{input_type}/{subject}_{input_type}_RAW.csv", usecols=["x_D", "y_D", "z_D",'x_ND', 'y_ND', 'z_ND'], engine="pyarrow")
 
         df = decimate_df(df, decimation_factor)
 
@@ -59,6 +61,12 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
         D = df_cut[['x_D', 'y_D', 'z_D']].to_numpy()
         ND = df_cut[['x_ND', 'y_ND', 'z_ND']].to_numpy()
 
+        # A window is invalid if ALL 6 channels (D and ND) are exactly 0 for the whole WINDOW_SIZE
+        n_windows = len(D) // WINDOW_SIZE
+        zero_samples = np.all(D == 0, axis=1) & np.all(ND == 0, axis=1)
+        invalid_windows = zero_samples.reshape(n_windows, WINDOW_SIZE).all(axis=1)
+        invalid_bitmap.extend(invalid_windows.tolist())
+
         magnitude_D = np.linalg.norm(D, axis=1)
         magnitude_ND = np.linalg.norm(ND, axis=1)
         
@@ -67,8 +75,6 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
             mag_ND = np.copy(magnitude_ND)
 
         # === Chunking vettoriale ===
-        n_windows = len(magnitude_D) // WINDOW_SIZE
-
         magnitude_D = magnitude_D.reshape(n_windows, WINDOW_SIZE)
         magnitude_ND = magnitude_ND.reshape(n_windows, WINDOW_SIZE)
 
@@ -85,8 +91,6 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
         y_MACS.extend([metadata.loc[index, 'MACS']] * n_windows)
         y.extend([metadata.loc[index, 'hemi'] - 1] * n_windows)
 
-    end = time.perf_counter()
-    print(f"ELAPSED TIME FOR CREATE_WINDOWS                                                        : {end - start:.4f} s")
     
     return (
         np.vstack(series),
@@ -94,5 +98,6 @@ def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, d
         np.array(y_MACS),
         np.array(y),
         mag_D,
-        mag_ND
+        mag_ND,
+        np.asarray(invalid_bitmap, dtype=np.uint8)
     )

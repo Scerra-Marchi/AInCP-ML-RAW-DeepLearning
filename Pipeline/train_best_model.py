@@ -27,7 +27,7 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, model_typ
     module_name, class_name = model_type.rsplit(".", 1)
     model = getattr(importlib.import_module(module_name), class_name)()
 
-    X, _, _, y, _, _ = create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
+    X, _, _, y, _, _, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
  
     param_grid = model_params
     #                                                             dobbiamo fixare il seed? FATTP
