@@ -1,70 +1,74 @@
 import numpy as np
-import pandas as pd
-from elaborate_magnitude import elaborate_magnitude
-from create_windows import decimate_df
+from create_windows import create_windows
 
 def predict_samples(data_folder, estimators, patient):
 
     if not estimators:
-        print('You have selected zero estimators to predict the samples with')
-        exit(1)
+        raise ValueError("You have selected zero estimators to predict the samples with")
 
     if len(set(es['window_size'] for es in estimators)) != 1:
-        print('You have selected estimators that operates on different window sizes')
-        exit(1)
-
-    df = pd.read_csv(data_folder + 'week/' + str(patient) + '_week_RAW.csv')
-    df = decimate_df(df, estimators[0]['decimation_factor']) # Decimazione delle time series 
-    magnitude_D = np.sqrt(np.square(np.array(df['x_D'])) + np.square(np.array(df['y_D'])) + np.square(np.array(df['z_D'])))
-    magnitude_ND = np.sqrt(np.square(np.array(df['x_ND'])) + np.square(np.array(df['y_ND'])) + np.square(np.array(df['z_ND'])))
-
-    to_discard = []
+        raise ValueError("You have selected estimators that operate on different window sizes")
 
     window_size = estimators[0]['window_size']
+    decimation_factor = estimators[0]['decimation_factor']
+
+    subject_indexes = [patient]
+
+    # ===============================
+    # FEATURE CACHE PER METHOD
+    # ===============================
+    method_to_features = {}
+    mag_D = mag_ND = invalid_bitmap = None
+
+    unique_methods = set(es['method'] for es in estimators)
+
+    for method in unique_methods:
+
+        X, _, _, _, mag_D, mag_ND, invalid_bitmap = create_windows(
+            data_folder=data_folder,
+            subjects_indexes=subject_indexes,
+            operation_type=method,
+            WINDOW_SIZE=window_size,
+            decimation_factor=decimation_factor,
+            input_type='week',
+            return_mag=1
+        )
+
+        method_to_features[method] = X
+
+    # assegna le serie a ogni estimator
+    for es in estimators:
+        es['series'] = method_to_features[es['method']]
+
+    # ===============================
+    # PREDIZIONE
+    # ===============================
+    y_list = []
+    hp_tot_list = []
 
     for es in estimators:
-        es['series'] = []   # Nuovo campo che conterrà le finestre
 
-    # Fase di chunking
-    for j in range (0, len(magnitude_D), window_size):
+        X = es['series']
+        y = np.asarray(es['estimator'].predict(X))
 
-        chunk_D = magnitude_D[j:j + window_size]
-        chunk_ND = magnitude_ND[j:j + window_size]
-
-        if chunk_D.size == window_size and chunk_ND.size == window_size:
-            
-            for es in estimators:
-                es['series'].append(elaborate_magnitude(es['method'], chunk_D, chunk_ND))
-
-            if np.all(chunk_D == 0) and np.all(chunk_ND == 0):  # Vengono scartate le finestre con solo valori a zero
-                to_discard.append(int(j/window_size))
-
-    y_list = [] # Lista dei valori predetti da ogni classificatore
-    hp_tot_list = [] # Lista dei CPI calcolati per questo paziente
-
-    # Fase di predizione
-    for es in estimators:
-        #print(np.array(es['series']).shape)
-        X_pred = np.array(es["series"])
-        y_pred = es["estimator"].predict(X_pred)
-        #print(es['method'])
-
-        for index in to_discard:
-            y_pred[index] = -1
-
-        cluster_healthy_samples = int(np.sum(y_pred == 0))     # Non emiplegici
-        cluster_hemiplegic_samples = int(np.sum(y_pred == 1))  # Emiplegici
-
-        y_mapped = np.zeros_like(y_pred, dtype=int)
-        y_mapped[y_pred == 0] = 1
-        y_mapped[y_pred == 1] = -1
+        cluster_healthy_samples = int(np.sum(y == 0))     # Non emiplegici
+        cluster_hemiplegic_samples = int(np.sum(y == 1))  # Emiplegici
+        # Apply bitmap: overwrite invalid windows with 0
+        y[np.asarray(invalid_bitmap, dtype=bool)] = -1
+        y_mapped = np.zeros_like(y, dtype=int)
+        y_mapped[y == 0] = 1
+        y_mapped[y == 1] = -1
+        y[np.asarray(invalid_bitmap, dtype=bool)] = 0
         y_list.append(y_mapped)
 
-        # Calcolo del CPI
-        hp_tot = np.nan
-        if (cluster_healthy_samples != 0 or cluster_hemiplegic_samples != 0):
-            hp_tot = (cluster_healthy_samples / (cluster_hemiplegic_samples + cluster_healthy_samples)) * 100
+        if (cluster_healthy_samples + cluster_hemiplegic_samples) > 0:
+            hp_tot = (
+                cluster_healthy_samples /
+                (cluster_healthy_samples + cluster_hemiplegic_samples)
+            ) * 100
+        else:
+            hp_tot = np.nan
 
         hp_tot_list.append(hp_tot)
 
-    return y_list, hp_tot_list, magnitude_D, magnitude_ND
+    return y_list, hp_tot_list, mag_D, mag_ND

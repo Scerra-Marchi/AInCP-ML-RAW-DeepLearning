@@ -15,7 +15,7 @@ from train_regressor import regressor_hash_from_estimators_specs
 
 
 def create_timestamps_list(data_folder):
-    patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv')  # I pazienti hanno tutti lo stesso numero di campioni
+    patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv', engine="pyarrow", usecols=['datetime'])  # I pazienti hanno tutti lo stesso numero di campioni
     datetimes = pd.to_datetime(patient_df[::3]['datetime'], format='%Y-%m-%d %H:%M:%S.%f')
     timestamps_list = matplotlib.dates.date2num(datetimes.dt.to_pydatetime())
     return timestamps_list

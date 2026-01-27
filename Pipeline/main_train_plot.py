@@ -66,7 +66,7 @@ if not os.path.exists(save_folder):
         l_method=['ai'] if args.debug else ['concat', 'difference', 'ai'],
         l_decimation_factor=l_decimation_factor
     )
-
+    
 if not os.path.exists(save_folder + 'Regressors/'):
 
     print(' ----- TRAINING REGRESSOR ----- ')

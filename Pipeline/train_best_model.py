@@ -20,7 +20,7 @@ def scorer_f(estimator, X, y):
 def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
     model = clone(estimator)
 
-    X, _, _, y = create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor)
+    X, _, _, y, _, _, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
     X = np.asarray(X)
     y = np.asarray(y)
 

@@ -1,67 +1,103 @@
 import pandas as pd
 import math
 import numpy as np
-from elaborate_magnitude import elaborate_magnitude
 from scipy.signal import decimate
+from elaborate_magnitude import elaborate_magnitude
+
 
 def decimate_df(data, factor):
     if factor <= 1:
         return data
-    # Isolare le colonne numeriche
-    df_axis = data[['x_D', 'y_D', 'z_D', 'x_ND', 'y_ND', 'z_ND']]
-    # Eseguire il downsampling
-    df_decimated = pd.DataFrame(decimate(df_axis, factor, axis=0, ftype='fir', zero_phase=True), columns=df_axis.columns).reset_index(drop=True)
-    # Isolare i timestamps corrispondenti
-    timestamps = pd.DataFrame(data['datetime'].iloc[::factor].reset_index(drop=True))
-    assert timestamps.shape[0] == df_decimated.shape[0], "Mismatch in lunghezza dopo decimation."
-    # Creare un nuovo DataFrame con i dati decimati e i timestamps
-    return pd.concat([timestamps, df_decimated], axis=1)
 
-def create_windows(data_folder, subjects_indexes, operation_type, WINDOW_SIZE, decimation_factor):
+    df_decimated = pd.DataFrame(
+        decimate(data, factor, axis=0, ftype='fir', zero_phase=True),
+        columns=data.columns
+    ).reset_index(drop=True)
+
+    return df_decimated
+
+
+def create_windows(
+    data_folder,
+    subjects_indexes,
+    operation_type,
+    WINDOW_SIZE,
+    decimation_factor,
+    input_type='AHA',
+    return_mag=0
+):
+
     series = []
     y_AHA = []
-    y_MACS =[]
+    y_MACS = []
     y = []
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
+    mag_D = np.array([])
+    mag_ND = np.array([])
+    invalid_bitmap = []
 
-    for index in range (metadata.shape[0]):
-        df = pd.read_csv(data_folder + 'AHA/' + str(metadata['subject'].iloc[index]) + '_AHA_RAW.csv')
 
-        # Si fa il downsampling della time series, prendendo un campione ogni 3 (80 Hz -> 26.67 Hz)
+    metadata = pd.read_excel(
+        data_folder + 'metadata2023_08.xlsx'
+    ).iloc[subjects_indexes].reset_index(drop=True)
+
+    for index in range(metadata.shape[0]):
+
+        subject = metadata.loc[index, 'subject']
+        df = pd.read_csv(f"{data_folder}{input_type}/{subject}_{input_type}_RAW.csv", usecols=["x_D", "y_D", "z_D",'x_ND', 'y_ND', 'z_ND'], engine="pyarrow")
+
         df = decimate_df(df, decimation_factor)
 
-        # Nel caso in cui non bastasse una duplicazione dell'intera time series questa verrà scartata
-        if df.shape[0]<WINDOW_SIZE:
-            df_concat = pd.concat([df, df.iloc[:WINDOW_SIZE-df.shape[0]]], ignore_index = True, axis = 0)
-            df = df_concat
-            #print('MODIFICATO Paziente ' + str(j) + ' -> df.shape[0] = ' + str(df.shape[0]))
+        if len(df) < WINDOW_SIZE:
+            df = pd.concat(
+                [df, df.iloc[:WINDOW_SIZE - len(df)]],
+                ignore_index=True
+            )
 
-        scart = (df.shape[0] % WINDOW_SIZE)/2
+        usable_len = (len(df) // WINDOW_SIZE) * WINDOW_SIZE
+        df_cut = df.iloc[:usable_len]
+
+
+        # === Magnitude computation (vectorized) ===
+        D = df_cut[['x_D', 'y_D', 'z_D']].to_numpy()
+        ND = df_cut[['x_ND', 'y_ND', 'z_ND']].to_numpy()
+
+        # A window is invalid if ALL 6 channels (D and ND) are exactly 0 for the whole WINDOW_SIZE
+        n_windows = len(D) // WINDOW_SIZE
+        zero_samples = np.all(D == 0, axis=1) & np.all(ND == 0, axis=1)
+        invalid_windows = zero_samples.reshape(n_windows, WINDOW_SIZE).all(axis=1)
+        invalid_bitmap.extend(invalid_windows.tolist())
+
+        magnitude_D = np.linalg.norm(D, axis=1)
+        magnitude_ND = np.linalg.norm(ND, axis=1)
         
-        df_cut = df.iloc[math.ceil(scart):df.shape[0]-math.floor(scart)]
+        if(return_mag):
+            mag_D = np.copy(magnitude_D)
+            mag_ND = np.copy(magnitude_ND)
 
-        x_D = np.array(df_cut['x_D'])
-        y_D = np.array(df_cut['y_D'])
-        z_D = np.array(df_cut['z_D'])
+        # === Chunking vettoriale ===
+        magnitude_D = magnitude_D.reshape(n_windows, WINDOW_SIZE)
+        magnitude_ND = magnitude_ND.reshape(n_windows, WINDOW_SIZE)
 
-        x_ND = np.array(df_cut['x_ND'])
-        y_ND = np.array(df_cut['y_ND'])
-        z_ND = np.array(df_cut['z_ND'])
+        # === Elaborazione batch ===
+        features = elaborate_magnitude(
+            operation_type,
+            magnitude_D,
+            magnitude_ND
+        )
 
-        # Calculating magnitude
-        magnitude_D = np.sqrt(np.square(x_D) + np.square(y_D) + np.square(z_D))
-        magnitude_ND = np.sqrt(np.square(x_ND) + np.square(y_ND) + np.square(z_ND))
-        for i in range (0, len(magnitude_D), WINDOW_SIZE):
-            chunk_D = magnitude_D[i:i + WINDOW_SIZE]
-            chunk_ND = magnitude_ND[i:i + WINDOW_SIZE]
-            series.append(elaborate_magnitude(operation_type, chunk_D, chunk_ND))
-            y_AHA.append(metadata['AHA'].iloc[index])
-            y_MACS.append(metadata['MACS'].iloc[index])
-            y.append(metadata['hemi'].iloc[index]-1)
+        series.append(features)
+
+        y_AHA.extend([metadata.loc[index, 'AHA']] * n_windows)
+        y_MACS.extend([metadata.loc[index, 'MACS']] * n_windows)
+        y.extend([metadata.loc[index, 'hemi'] - 1] * n_windows)
+
     
-    return np.array(series), y_AHA, y_MACS, np.array(y)
-
-    #return np.array(copy.deepcopy(series)), y_AHA, y_MACS, np.array(copy.deepcopy(y))
-    # create a list of dictionaries
-    #dicts = [{"column": lst} for lst in series]
-    #return pd.DataFrame(dicts).copy(), y_AHA, y_MACS, np.array(y)
+    return (
+        np.vstack(series),
+        np.array(y_AHA),
+        np.array(y_MACS),
+        np.array(y),
+        mag_D,
+        mag_ND,
+        np.asarray(invalid_bitmap, dtype=np.uint8)
+    )
