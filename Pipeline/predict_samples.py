@@ -51,23 +51,15 @@ def predict_samples(data_folder, estimators, patient):
         X = es['series']
         y = np.asarray(es['estimator'].predict(X))
 
-        hemi_cluster = es['hemi_cluster']
-
-        cluster_healthy_samples = 0
-        cluster_hemiplegic_samples = 0
-
-        for k in range(len(y)):
-            if y[k] == hemi_cluster:
-                cluster_hemiplegic_samples += 1
-                y[k] = -1
-            else:
-                cluster_healthy_samples += 1
-                y[k] = 1
-
+        cluster_healthy_samples = int(np.sum(y == 0))     # Non emiplegici
+        cluster_hemiplegic_samples = int(np.sum(y == 1))  # Emiplegici
         # Apply bitmap: overwrite invalid windows with 0
+        y[np.asarray(invalid_bitmap, dtype=bool)] = -1
+        y_mapped = np.zeros_like(y, dtype=int)
+        y_mapped[y == 0] = 1
+        y_mapped[y == 1] = -1
         y[np.asarray(invalid_bitmap, dtype=bool)] = 0
-
-        y_list.append(y)
+        y_list.append(y_mapped)
 
         if (cluster_healthy_samples + cluster_hemiplegic_samples) > 0:
             hp_tot = (

@@ -1,13 +1,29 @@
-import json
 import hashlib
+import json
 import numpy as np
 import joblib as jl
 import pandas as pd
-from sktime.base import BaseEstimator
 from sklearn.linear_model import LinearRegression
 from predict_samples import predict_samples
 import os
 import sys
+
+
+def regressor_hash_from_estimators_specs(estimators_specs_list) -> str:
+    specs = sorted(
+        [
+            (
+                str(r["method"]),
+                int(r["window_size"]),
+                int(r["decimation_factor"]),
+                str(r["model_type"]).split(".")[-1],
+                str(r["gridsearch_hash"]),
+            )
+            for r in estimators_specs_list
+        ]
+    )
+    return hashlib.sha256(json.dumps(specs, separators=(",", ":")).encode()).hexdigest()[:10]
+
 
 def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score, window_size, decimation_factor):
 
@@ -26,13 +42,24 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
     for estimators_specs in estimators_specs_list:
         estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
 
-        with open(estimator_dir + 'GridSearchCV_stats/best_estimator_stats.json', "r") as stats_f:
-            grid_search_best_params = json.load(stats_f)
-
-        estimator = BaseEstimator().load_from_path(estimator_dir + 'best_estimator.zip')
-        estimators_list.append({'estimator': estimator, 'method': estimators_specs['method'], 'window_size': estimators_specs['window_size'], 'decimation_factor': estimators_specs['decimation_factor'], 'hemi_cluster': grid_search_best_params['Hemi cluster']})
-        print('Loaded -> ', estimator_dir + 'best_estimator.zip')
+        estimator = jl.load(estimator_dir + "best_estimator.joblib")
+        estimators_list.append(
+            {
+                "estimator": estimator,
+                "method": estimators_specs["method"],
+                "window_size": estimators_specs["window_size"],
+                "decimation_factor": estimators_specs["decimation_factor"],
+            }
+        )
+        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
         model_params_concat = model_params_concat + str(estimator.get_params())
+
+    reg_path = 'regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
+    os.makedirs(save_folder + 'Regressors/', exist_ok = True)
+    reg_full_path = save_folder + 'Regressors/' + reg_path
+    if os.path.exists(reg_full_path):
+        print("REGRESSOR: already trained ->", reg_full_path)
+        return
 
     # Allenamento del regressore
 
@@ -49,11 +76,8 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
     X = np.array(hp_tot_list_list)
     y = np.array(metadata['AHA'].iloc[train_indexes].values)
 
-    reg_path = 'regressor_'+ (hashlib.sha256((model_params_concat).encode()).hexdigest()[:10])
-
     model = LinearRegression()
     print('REGRESSOR: START FIT')
     model.fit(X, y)
     print('REGRESSOR: END FIT')
-    os.makedirs(save_folder + 'Regressors/', exist_ok = True)
-    jl.dump(model, save_folder + 'Regressors/'+reg_path)
+    jl.dump(model, reg_full_path)
