@@ -1,7 +1,7 @@
 import numpy as np
 from create_windows import create_windows
 
-def predict_samples(data_folder, estimators, patient):
+def predict_samples(data_folder, estimators, subject_indexes):
 
     if not estimators:
         raise ValueError("You have selected zero estimators to predict the samples with")
@@ -11,8 +11,6 @@ def predict_samples(data_folder, estimators, patient):
 
     window_size = estimators[0]['window_size']
     decimation_factor = estimators[0]['decimation_factor']
-
-    subject_indexes = [patient]
 
     # ===============================
     # FEATURE CACHE PER METHOD

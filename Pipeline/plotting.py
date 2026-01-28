@@ -98,7 +98,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
     for index in range(len(metadata)):
         subject = metadata['subject'].iloc[index]
-        predictions, hp_tot_list, magnitude_D, magnitude_ND = predict_samples(data_folder, estimators_list, subject)
+        predictions, hp_tot_list, magnitude_D, magnitude_ND = predict_samples(data_folder, estimators_list, [index])
         healthy_percentage.append(hp_tot_list)
         real_aha = metadata['AHA'].iloc[index]
         predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
