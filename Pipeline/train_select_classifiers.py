@@ -51,7 +51,7 @@ def train_select_classifiers(
         device = "cuda" if torch.cuda.is_available() else "cpu"
         skorch_common = {
             "criterion": nn.CrossEntropyLoss,
-            "max_epochs": 5,
+            "max_epochs": 200,
             "lr": 1e-3,
             "batch_size": 64,
             "iterator_train__shuffle": True,
@@ -125,12 +125,20 @@ def train_select_classifiers(
     estimators_l = []
     best_estimators_l = []
 
-    for method, window_size, gridsearch_specs, decimation_factor in itertools.product(
-        l_method, l_window_size, gridsearch_specs_list, l_decimation_factor
+    pipeline_dir = os.path.dirname(os.path.abspath(__file__))
+    if hasattr(subjects_indexes, "tolist"):
+        subjects_indexes = subjects_indexes.tolist()
+
+    runs = []
+    train_tasks = []
+
+    indexed_specs = list(enumerate(gridsearch_specs_list))
+
+    for method, window_size, (spec_idx, gridsearch_specs), decimation_factor in itertools.product(
+        l_method, l_window_size, indexed_specs, l_decimation_factor
     ):
 
         model_name = _safe_model_name(gridsearch_specs["name"])
-        estimator = gridsearch_specs["estimator"]
         param_grid = gridsearch_specs["param_grid"]
 
         gridsearch_hash = _hash_param_grid(param_grid)
@@ -164,20 +172,95 @@ def train_select_classifiers(
             + "/"
         )
 
+        runs.append(
+            {
+                "method": method,
+                "window_size": window_size,
+                "decimation_factor": decimation_factor,
+                "model_name": model_name,
+                "gridsearch_hash": gridsearch_hash,
+                "gridsearch_folder": gridsearch_folder,
+            }
+        )
+
         if not (os.path.exists(gridsearch_folder + "best_estimator.joblib")) or not (
             os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv")
         ):
+            train_tasks.append(
+                {
+                    "spec_idx": spec_idx,
+                    "gridsearch_folder": gridsearch_folder,
+                    "method": method,
+                    "window_size": window_size,
+                    "decimation_factor": decimation_factor,
+                }
+            )
 
-            train_best_model(
+    if train_tasks:
+        try:
+            import ray
+            from ray import tune
+            from ray.tune import RunConfig
+        except Exception as e:
+            raise ImportError(
+                "Ray is required for multi-GPU scheduling. Install it with `pip install 'ray[default,tune]'`."
+            ) from e
+
+        def _ray_train_best_model(config, pipeline_dir, data_folder, subjects_indexes, gridsearch_specs_list):
+            task = config["task"]
+
+            os.chdir(pipeline_dir)
+
+            seed = 42
+            random.seed(seed)
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+
+            # Import inside the Ray worker after chdir so local imports work.
+            from train_best_model import train_best_model as _train_best_model
+
+            gridsearch_specs = gridsearch_specs_list[int(task["spec_idx"])]
+
+            _train_best_model(
                 data_folder,
                 subjects_indexes,
-                gridsearch_folder,
-                estimator,
-                param_grid,
-                method,
-                window_size,
-                decimation_factor,
+                task["gridsearch_folder"],
+                gridsearch_specs["estimator"],
+                gridsearch_specs["param_grid"],
+                task["method"],
+                task["window_size"],
+                task["decimation_factor"],
             )
+
+        if not ray.is_initialized():
+            init_kwargs = {"ignore_reinit_error": True, "log_to_driver": True}
+            if torch.cuda.is_available():
+                init_kwargs["num_gpus"] = torch.cuda.device_count()
+            ray.init(**init_kwargs)
+
+        resources = {"cpu": 1, "gpu": 1} if torch.cuda.is_available() else {"cpu": 1}
+        trainable = tune.with_parameters(
+            _ray_train_best_model,
+            pipeline_dir=pipeline_dir,
+            data_folder=data_folder,
+            subjects_indexes=subjects_indexes,
+            gridsearch_specs_list=gridsearch_specs_list,
+        )
+        tuner = tune.Tuner(
+            tune.with_resources(trainable, resources),
+            param_space={"task": tune.grid_search(train_tasks)},
+            run_config=RunConfig(name="train_select_classifiers", verbose=1),
+        )
+        tuner.fit()
+
+    for run in runs:
+        gridsearch_folder = run["gridsearch_folder"]
+        method = run["method"]
+        window_size = run["window_size"]
+        decimation_factor = run["decimation_factor"]
+        model_name = run["model_name"]
+        gridsearch_hash = run["gridsearch_hash"]
 
         cv_results = pd.read_csv(gridsearch_folder + 'GridSearchCV_stats/cv_results.csv', index_col=0)
         cv_results.columns = cv_results.columns.str.strip()
