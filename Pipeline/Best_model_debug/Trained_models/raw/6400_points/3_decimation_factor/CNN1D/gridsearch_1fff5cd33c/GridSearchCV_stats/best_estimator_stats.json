@@ -1,0 +1,10 @@
+{
+    "Best index": 0,
+    "Best score": 0.6,
+    "Refit time": 0.23843908309936523,
+    "Best params": {
+        "lr": 0.001,
+        "module__channels": 16,
+        "module__kernel_size": 5
+    }
+}

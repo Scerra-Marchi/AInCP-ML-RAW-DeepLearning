@@ -1,0 +1,12 @@
+{
+    "Best index": 0,
+    "Best score": 0.6,
+    "Refit time": 0.7566044330596924,
+    "Best params": {
+        "lr": 0.001,
+        "module__d_model": 32,
+        "module__nhead": 4,
+        "module__num_layers": 2,
+        "module__patch_size": 32
+    }
+}

@@ -66,24 +66,20 @@ def create_windows(
         zero_samples = np.all(D == 0, axis=1) & np.all(ND == 0, axis=1)
         invalid_windows = zero_samples.reshape(n_windows, WINDOW_SIZE).all(axis=1)
         invalid_bitmap.extend(invalid_windows.tolist())
-
-        magnitude_D = np.linalg.norm(D, axis=1)
-        magnitude_ND = np.linalg.norm(ND, axis=1)
         
         if(return_mag):
-            mag_D = np.copy(magnitude_D)
-            mag_ND = np.copy(magnitude_ND)
+            mag_D = np.linalg.norm(D, axis=1)
+            mag_ND = np.linalg.norm(ND, axis=1)
 
-        # === Chunking vettoriale ===
-        magnitude_D = magnitude_D.reshape(n_windows, WINDOW_SIZE)
-        magnitude_ND = magnitude_ND.reshape(n_windows, WINDOW_SIZE)
+        D_w = D.reshape(n_windows, WINDOW_SIZE, 3)
+        ND_w = ND.reshape(n_windows, WINDOW_SIZE, 3)
 
-        # === Elaborazione batch ===
         features = elaborate_magnitude(
             operation_type,
-            magnitude_D,
-            magnitude_ND
+            D_w,
+            ND_w
         )
+
 
         series.append(features)
 

@@ -1,0 +1,10 @@
+{
+    "Best index": 0,
+    "Best score": 0.4,
+    "Refit time": 0.28545403480529785,
+    "Best params": {
+        "lr": 0.001,
+        "module__downsample": 16,
+        "module__reservoir_size": 200
+    }
+}
