@@ -239,7 +239,8 @@ def train_select_classifiers(
                 init_kwargs["num_gpus"] = torch.cuda.device_count()
             ray.init(**init_kwargs)
 
-        resources = {"cpu": 1, "gpu": 1} if torch.cuda.is_available() else {"cpu": 1}
+        resources = {"gpu": 1} if torch.cuda.is_available() else {"cpu": os.cpu_count()}
+
         trainable = tune.with_parameters(
             _ray_train_best_model,
             pipeline_dir=pipeline_dir,
