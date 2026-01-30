@@ -156,6 +156,9 @@ def train_select_classifiers(
             train_tasks.append(run)
 
     if train_tasks:
+        # Ray prints warnings/errors related to accelerator env var overrides and metrics exporting.
+        os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
+
         import ray
         from ray import tune
         from ray.tune import RunConfig
@@ -187,7 +190,11 @@ def train_select_classifiers(
                 task["decimation_factor"],
             )
 
-        ray.init(ignore_reinit_error=True, log_to_driver=True)
+        ray.init(
+            ignore_reinit_error=True,
+            log_to_driver=True,
+            num_gpus=(torch.cuda.device_count() if torch.cuda.is_available() else 0),
+        )
 
         resources = {"gpu": 1} if torch.cuda.is_available() else {"cpu": (os.cpu_count() or 1)}
 
@@ -204,6 +211,7 @@ def train_select_classifiers(
             run_config=RunConfig(name="train_select_classifiers", verbose=1),
         )
         tuner.fit()
+        ray.shutdown()
 
     for run in runs:
         cv_results = pd.read_csv(
