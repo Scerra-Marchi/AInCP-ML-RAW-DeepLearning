@@ -197,14 +197,9 @@ def train_select_classifiers(
             )
 
     if train_tasks:
-        try:
-            import ray
-            from ray import tune
-            from ray.tune import RunConfig
-        except Exception as e:
-            raise ImportError(
-                "Ray is required for multi-GPU scheduling. Install it with `pip install 'ray[default,tune]'`."
-            ) from e
+        import ray
+        from ray import tune
+        from ray.tune import RunConfig
 
         def _ray_train_best_model(config, pipeline_dir, data_folder, subjects_indexes, gridsearch_specs_list):
             task = config["task"]
@@ -233,13 +228,9 @@ def train_select_classifiers(
                 task["decimation_factor"],
             )
 
-        if not ray.is_initialized():
-            init_kwargs = {"ignore_reinit_error": True, "log_to_driver": True}
-            if torch.cuda.is_available():
-                init_kwargs["num_gpus"] = torch.cuda.device_count()
-            ray.init(**init_kwargs)
+        ray.init(ignore_reinit_error=True, log_to_driver=True)
 
-        resources = {"gpu": 1} if torch.cuda.is_available() else {"cpu": os.cpu_count()}
+        resources = {"gpu": 1} if torch.cuda.is_available() else {"cpu": (os.cpu_count() or 1)}
 
         trainable = tune.with_parameters(
             _ray_train_best_model,
@@ -251,25 +242,23 @@ def train_select_classifiers(
         tuner = tune.Tuner(
             tune.with_resources(trainable, resources),
             param_space={"task": tune.grid_search(train_tasks)},
-            run_config=RunConfig(name="train_select_classifiers", verbose=1),
+            run_config=RunConfig(name="train_select_classifiers", verbose=2),
         )
         tuner.fit()
 
     for run in runs:
-        gridsearch_folder = run["gridsearch_folder"]
-        method = run["method"]
-        window_size = run["window_size"]
-        decimation_factor = run["decimation_factor"]
-        model_name = run["model_name"]
-        gridsearch_hash = run["gridsearch_hash"]
-
-        cv_results = pd.read_csv(gridsearch_folder + 'GridSearchCV_stats/cv_results.csv', index_col=0)
+        cv_results = pd.read_csv(
+            run["gridsearch_folder"] + "GridSearchCV_stats/cv_results.csv",
+            index_col=0,
+        )
         cv_results.columns = cv_results.columns.str.strip()
-        cv_results['method'] = method
-        cv_results['window_size'] = window_size
-        cv_results['decimation_factor'] = decimation_factor
-        cv_results['model_type'] = model_name
-        cv_results['gridsearch_hash'] = gridsearch_hash
+        cv_results = cv_results.assign(
+            method=run["method"],
+            window_size=run["window_size"],
+            decimation_factor=run["decimation_factor"],
+            model_type=run["model_name"],
+            gridsearch_hash=run["gridsearch_hash"],
+        )
 
         estimators_l.append(cv_results)
         best_estimators_l.append(cv_results.iloc[[cv_results['rank_test_score'].argmin()]])
