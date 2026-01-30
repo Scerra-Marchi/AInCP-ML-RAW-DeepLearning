@@ -17,9 +17,6 @@ from skorch_models import (
     TransformerSequenceClassifier,
 )
 
-#import warnings 
-
-#warnings.filterwarnings("ignore")
 
 def _safe_model_name(name: str) -> str:
     return "".join(ch if (ch.isalnum() or ch in ("-", "_")) else "_" for ch in name)
@@ -153,7 +150,7 @@ def train_select_classifiers(
         if not (os.path.exists(gridsearch_folder + "best_estimator.joblib")) or not (
             os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv")
         ):
-            train_tasks.append(run)
+            train_tasks.append(dict(run))
 
     if train_tasks:
         # Ray prints warnings/errors related to accelerator env var overrides and metrics exporting.
