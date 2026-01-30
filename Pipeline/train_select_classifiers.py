@@ -3,7 +3,6 @@ import os
 import hashlib
 import itertools
 import pandas as pd
-from train_best_model import train_best_model
 
 import random
 import torch
@@ -42,12 +41,6 @@ def train_select_classifiers(
 ):
 
     if gridsearch_specs_list is None:
-        seed = 42
-        random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-
         device = "cuda" if torch.cuda.is_available() else "cpu"
         skorch_common = {
             "criterion": nn.CrossEntropyLoss,
@@ -143,58 +136,24 @@ def train_select_classifiers(
 
         gridsearch_hash = _hash_param_grid(param_grid)
 
-        print(
-            "Method: ",
-            method,
-            "\nWindow size: ",
-            window_size,
-            "\nModel type: ",
-            model_name,
-            "\nDecimation factor: ",
-            decimation_factor,
-            "\nGrid search params: ",
-            param_grid,
-        )
+        gridsearch_folder = f"{save_folder}Trained_models/{method}/{window_size}_points/{decimation_factor}_decimation_factor/{model_name}/gridsearch_{gridsearch_hash}/"
 
-        gridsearch_folder = (
-            save_folder
-            + "Trained_models/"
-            + method
-            + "/"
-            + str(window_size)
-            + "_points/"
-            + str(decimation_factor)
-            + "_decimation_factor/"
-            + model_name
-            + "/"
-            + "gridsearch_"
-            + gridsearch_hash
-            + "/"
-        )
-
-        runs.append(
-            {
-                "method": method,
-                "window_size": window_size,
-                "decimation_factor": decimation_factor,
-                "model_name": model_name,
-                "gridsearch_hash": gridsearch_hash,
-                "gridsearch_folder": gridsearch_folder,
-            }
-        )
+        run = {
+            "spec_idx": spec_idx,
+            "method": method,
+            "window_size": window_size,
+            "decimation_factor": decimation_factor,
+            "model_name": model_name,
+            "gridsearch_hash": gridsearch_hash,
+            "gridsearch_folder": gridsearch_folder,
+            "param_grid": param_grid,
+        }
+        runs.append(run)
 
         if not (os.path.exists(gridsearch_folder + "best_estimator.joblib")) or not (
             os.path.exists(gridsearch_folder + "GridSearchCV_stats/cv_results.csv")
         ):
-            train_tasks.append(
-                {
-                    "spec_idx": spec_idx,
-                    "gridsearch_folder": gridsearch_folder,
-                    "method": method,
-                    "window_size": window_size,
-                    "decimation_factor": decimation_factor,
-                }
-            )
+            train_tasks.append(run)
 
     if train_tasks:
         import ray
@@ -213,11 +172,11 @@ def train_select_classifiers(
                 torch.cuda.manual_seed_all(seed)
 
             # Import inside the Ray worker after chdir so local imports work.
-            from train_best_model import train_best_model as _train_best_model
+            from train_best_model import train_best_model
 
             gridsearch_specs = gridsearch_specs_list[int(task["spec_idx"])]
 
-            _train_best_model(
+            train_best_model(
                 data_folder,
                 subjects_indexes,
                 task["gridsearch_folder"],
@@ -242,7 +201,7 @@ def train_select_classifiers(
         tuner = tune.Tuner(
             tune.with_resources(trainable, resources),
             param_space={"task": tune.grid_search(train_tasks)},
-            run_config=RunConfig(name="train_select_classifiers", verbose=2),
+            run_config=RunConfig(name="train_select_classifiers", verbose=1),
         )
         tuner.fit()
 
