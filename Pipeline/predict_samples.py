@@ -16,20 +16,19 @@ def predict_samples(data_folder, estimators, subject_indexes):
     # FEATURE CACHE PER METHOD
     # ===============================
     method_to_features = {}
-    mag_D = mag_ND = invalid_bitmap = None
+    invalid_bitmap = None
 
     unique_methods = set(es['method'] for es in estimators)
 
     for method in unique_methods:
 
-        X, _, _, _, mag_D, mag_ND, invalid_bitmap = create_windows(
+        X, _, _, _, invalid_bitmap = create_windows(
             data_folder=data_folder,
             subjects_indexes=subject_indexes,
             operation_type=method,
             WINDOW_SIZE=window_size,
             decimation_factor=decimation_factor,
             input_type='week',
-            return_mag=1
         )
 
         method_to_features[method] = X
@@ -69,4 +68,4 @@ def predict_samples(data_folder, estimators, subject_indexes):
 
         hp_tot_list.append(hp_tot)
 
-    return y_list, hp_tot_list, mag_D, mag_ND
+    return y_list, hp_tot_list

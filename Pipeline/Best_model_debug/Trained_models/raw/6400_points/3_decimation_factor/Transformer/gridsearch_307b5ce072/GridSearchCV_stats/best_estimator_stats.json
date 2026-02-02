@@ -1,7 +1,7 @@
 {
     "Best index": 0,
-    "Best score": 0.6,
-    "Refit time": 0.7305386066436768,
+    "Best score": 0.8,
+    "Refit time": 0.9149644374847412,
     "Best params": {
         "lr": 0.001,
         "module__d_model": 32,

@@ -12,15 +12,11 @@ import sys
 import warnings
 warnings.filterwarnings("ignore")   #TODO: remove this line when the code is stable
 
-def scorer_f(estimator, X, y):
-    y_pred = estimator.predict(X)
-    return f1_score(y, y_pred, average="weighted")
-
 
 def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
     model = clone(estimator)
 
-    X, _, _, y, _, _, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
+    X, _, _, y, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
     X = np.asarray(X)
     y = np.asarray(y)
 
@@ -40,7 +36,7 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
         n_jobs=1,
         return_train_score=True,
         verbose=3,
-        scoring=scorer_f,
+        scoring="f1_weighted",
     )
     parameter_tuning_method.fit(X, y)
 
