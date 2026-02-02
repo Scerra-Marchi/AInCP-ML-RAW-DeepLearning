@@ -24,7 +24,7 @@ parser.add_argument("--debug", action="store_true")
 args = parser.parse_args()
 
 save_folder = 'Best_model_debug/' if args.debug else 'Best_model/'
-min_mean_test_score = 0.6 if args.debug else 0.85  # TODO: change to 0.85
+min_mean_test_score = 0.0 if args.debug else 0.85  # TODO: change to 0.85
 
 metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx')
 subjects_indexes = list(range(len(metadata)))
@@ -34,8 +34,24 @@ sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
 train_indexes, test_indexes = next(sss.split(metadata, metadata['hemi']))
 
 if args.debug:
-    train_indexes = [0, 1, 2, 3, 4]
-    test_indexes = [0, 1]
+    rng = np.random.default_rng(42)
+    train_idx = np.array(train_indexes, dtype=int)
+    test_idx = np.array(test_indexes, dtype=int)
+
+    train_labels = metadata['hemi'].iloc[train_idx].to_numpy()
+    test_labels = metadata['hemi'].iloc[test_idx].to_numpy()
+
+    def _subset(indexes: np.ndarray, labels: np.ndarray, n_per_class: int) -> np.ndarray:
+        out = []
+        for label in np.unique(labels):
+            group = indexes[labels == label]
+            if group.size == 0:
+                continue
+            out.append(rng.choice(group, size=min(n_per_class, group.size), replace=False))
+        return np.concatenate(out) if out else np.array([], dtype=int)
+
+    train_indexes = _subset(train_idx, train_labels, n_per_class=2)
+    test_indexes = _subset(test_idx, test_labels, n_per_class=1)
 
 
 if not os.path.exists(save_folder):
@@ -47,7 +63,7 @@ if not os.path.exists(save_folder):
         save_folder=save_folder,
         subjects_indexes=train_indexes,
         l_window_size=l_window_size,
-        l_method=['concat', 'difference', 'ai', 'enmo', 'raw'],
+        l_method=['ai', 'enmo', 'raw'] if args.debug else ['concat', 'difference', 'ai', 'enmo', 'raw'],
         l_decimation_factor=l_decimation_factor
     )
     
