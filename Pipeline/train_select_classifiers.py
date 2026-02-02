@@ -4,8 +4,9 @@
 # - decimation factors
 # - model families (LSTM/GRU/RNN/CNN1D/Transformer/Reservoir)
 #
-# The function optionally runs a Ray Tune job to train missing runs, then aggregates
-# the stored GridSearchCV results into summary CSVs.
+# The function runs a Ray Tune job over the full Cartesian grid; each trial skips work
+# when its artifacts are already present on disk, then cv_results.csv files are aggregated
+# into summary CSVs.
 import json
 import os
 import hashlib
@@ -47,9 +48,9 @@ def train_select_classifiers(
 ):
     # Main orchestration entry point:
     # 1) define (or accept) model specs + parameter grids,
-    # 2) enumerate all combinations of method/window/model/decimation,
-    # 3) train missing combinations (distributed via Ray),
-    # 4) load and aggregate cv_results.csv for all runs.
+    # 2) define a Cartesian grid for Ray Tune,
+    # 3) train missing combinations (trials early-exit when artifacts already exist),
+    # 4) load and aggregate cv_results.csv across the selected grid.
 
     if gridsearch_specs_list is None:
         # Default model specs used when the caller doesn't provide their own list.
@@ -243,24 +244,18 @@ def train_select_classifiers(
     estimators_l = []
     best_estimators_l = []
     for result in result_grid:
-        config = getattr(result, "config", None) or {}
-        try:
-            method = config["method"]
-            window_size = int(config["window_size"])
-            decimation_factor = int(config["decimation_factor"])
-            spec_idx = int(config["spec_idx"])
-        except (KeyError, TypeError, ValueError):
-            continue
-
-        if spec_idx < 0 or spec_idx >= len(gridsearch_specs_list):
-            continue
+        # `result_grid` contains one entry per Tune trial (i.e., one point in the Cartesian product).
+        # We use the trial `config` to deterministically reconstruct the output folder where
+        # train_best_model wrote the GridSearchCV statistics, then load and tag cv_results.csv.
+        config = result.config
+        method = config["method"]
+        window_size = int(config["window_size"])
+        decimation_factor = int(config["decimation_factor"])
+        spec_idx = int(config["spec_idx"])
 
         gridsearch_specs = gridsearch_specs_list[spec_idx]
         gridsearch_folder = _gridsearch_folder_for_task(method, window_size, decimation_factor, gridsearch_specs)
         cv_results_path = gridsearch_folder + "GridSearchCV_stats/cv_results.csv"
-        if not os.path.exists(cv_results_path):
-            continue
-
         cv_results = pd.read_csv(cv_results_path, index_col=0)
         cv_results.columns = cv_results.columns.str.strip()
 
