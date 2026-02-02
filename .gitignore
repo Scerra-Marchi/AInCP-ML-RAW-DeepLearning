@@ -14,6 +14,9 @@ __pycache__/
 # ignore the Results folder
 **/Results/
 
+# ignore debug iterations outputs (including summary files)
+Pipeline/Iterations_debug/
+
 # ignore timestamp list
 **/timestamps_list
 
