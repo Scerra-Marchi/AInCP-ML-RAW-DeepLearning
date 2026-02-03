@@ -1,168 +1,309 @@
-import os
+import argparse
 import json
-import multiprocessing
+import os
+from datetime import datetime, timezone
+from typing import Iterable, Tuple
+
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import RepeatedStratifiedKFold
-from train_select_classifiers import train_select_classifiers
-from train_regressor import train_regressor
+
+from plotting import plot_corrcoeff, plot_dashboards
 from test_classifier_regressor import test_classifier_regressor
-from plotting import plot_dashboards, plot_corrcoeff
+from train_regressor import train_regressor
+from train_select_classifiers import train_select_classifiers
 
-# Cambio la directory di esecuzione in quella dove si trova questo file
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+RANDOM_STATE = 42
+TOTAL_FOLDS = 10
 
-#data_folder = 'C:/Users/david/Documents/University/Borsa di Studio - REDCap/only_AC-80_patients/'
-data_folder = '../../../Dati_RAW/'
+# NOTE: As stated in README.md, update this path to your dataset location if needed.
+DATA_FOLDER = "../Dataset/"
 
-number_of_iterations = 5
-min_mean_test_score = 0.7
-window_size = 6400
+WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
+DECIMATION_FACTOR = 3
 
-folder = 'Iterations/'
-
-# New
-if not os.path.exists(folder):
-
-    print(' ----- CREATING ITERATIONS FOLDERS AND TRAINING CLASSIFIERS ----- ')
-    processes = []
-    iteration = 0
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx')
-    labels = metadata['hemi'].values    # Maybe it is better to straify on AHA as well?
-    rskf = RepeatedStratifiedKFold(n_splits=number_of_iterations, n_repeats=1, random_state=42)
-
-    for train_indexes, test_indexes in rskf.split(np.empty(metadata.shape[0]), labels):
-
-        # Creating a structured dictionary
-        data = {
-            "Iteration": iteration,
-            "Train Indexes": train_indexes.tolist(),
-            "Test Indexes": test_indexes.tolist()
-        }
-
-        save_folder = folder + 'Iteration_' + str(iteration) + '/'
-        os.makedirs(save_folder)
-        iteration += 1
-        
-        # Writing to a JSON file
-        with open(save_folder + 'iteration_data.json', 'w') as file:
-            json.dump(data, file, indent=4)
-        
-        p = multiprocessing.Process(target=train_select_classifiers, args=(data_folder, save_folder, train_indexes, [window_size]))
-        p.start()
-        processes.append(p)
-
-    for p in processes:
-        p.join()
+DEFAULT_ITERATIONS = TOTAL_FOLDS
+CV_MIN_MEAN_TEST_SCORE = 0.7
 
 
-if not os.path.exists(folder + 'Iteration_0/Regressors/'):
+def _subset_per_class(
+    rng: np.random.Generator,
+    indexes: np.ndarray,
+    labels: np.ndarray,
+    n_per_class: int,
+) -> np.ndarray:
+    out = []
+    for label in np.unique(labels):
+        group = indexes[labels == label]
+        if group.size == 0:
+            continue
+        out.append(rng.choice(group, size=min(n_per_class, group.size), replace=False))
+    return np.concatenate(out) if out else np.array([], dtype=int)
 
-    print(' ----- TRAINING REGRESSORS ----- ')
-    processes = []
 
-    for iteration in range(number_of_iterations):
+def _run_iteration(
+    *,
+    data_folder: str,
+    save_folder: str,
+    train_indexes: Iterable[int],
+    test_indexes: Iterable[int],
+    min_mean_test_score: float,
+    window_size: int,
+    decimation_factor: int,
+    methods: list,
+) -> None:
+    os.makedirs(save_folder, exist_ok=True)
 
-        save_folder = folder + 'Iteration_' + str(iteration) + '/'
+    best_estimators_csv = os.path.join(save_folder, "best_estimators_results.csv")
+    if not os.path.exists(best_estimators_csv):
+        print(" ----- TRAINING CLASSIFIERS ----- ")
+        train_select_classifiers(
+            data_folder,
+            save_folder=save_folder,
+            subjects_indexes=list(train_indexes),
+            l_window_size=[window_size],
+            l_method=methods,
+            l_decimation_factor=[decimation_factor],
+        )
 
-        # Reading from a JSON file and accessing data
-        with open(save_folder + 'iteration_data.json', 'r') as file:
+    print(" ----- TRAINING REGRESSOR ----- ")
+    train_regressor(
+        data_folder,
+        save_folder=save_folder,
+        train_indexes=list(train_indexes),
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
+
+    combined_test_stats = os.path.join(save_folder, "combined_test_stats.json")
+    if not os.path.exists(combined_test_stats):
+        print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
+        test_classifier_regressor(
+            data_folder,
+            save_folder=save_folder,
+            test_indexes=list(test_indexes),
+            min_mean_test_score=min_mean_test_score,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+        )
+
+    predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
+    if not os.path.exists(predictions_df):
+        print(" ----- CREATING DASHBOARDS ----- ")
+        plot_dashboards(
+            data_folder,
+            save_folder=save_folder,
+            subjects_indexes=list(test_indexes),
+            min_mean_test_score=min_mean_test_score,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+        )
+
+
+def _iteration_done(save_folder: str) -> bool:
+    # "Done" means we have both the stats and the plots that plot_corrcoeff consumes.
+    iteration_json = os.path.join(save_folder, "iteration_data.json")
+    combined_test_stats = os.path.join(save_folder, "combined_test_stats.json")
+    predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
+    return (
+        os.path.exists(iteration_json)
+        and os.path.exists(combined_test_stats)
+        and os.path.exists(predictions_df)
+    )
+
+
+def _ensure_cv_manifest(iterations_root: str) -> None:
+    manifest_path = os.path.join(iterations_root, "cv_manifest.json")
+    if os.path.exists(manifest_path):
+        with open(manifest_path, "r") as file:
+            manifest = json.load(file)
+
+        total_folds = int(manifest.get("total_folds", -1))
+        random_state = int(manifest.get("random_state", -1))
+        if total_folds != TOTAL_FOLDS or random_state != RANDOM_STATE:
+            raise SystemExit(
+                f"Incompatible CV manifest in '{iterations_root}'. "
+                f"Expected total_folds={TOTAL_FOLDS}, random_state={RANDOM_STATE}; "
+                f"found total_folds={total_folds}, random_state={random_state}. "
+                f"Rename/delete '{iterations_root}' to start a new run."
+            )
+        return
+
+    # If a legacy Iterations folder exists (created with a different number of folds),
+    # fail fast to avoid mixing splits.
+    legacy_iteration_jsons = []
+    for name in os.listdir(iterations_root):
+        if not name.startswith("Iteration_"):
+            continue
+        json_path = os.path.join(iterations_root, name, "iteration_data.json")
+        if os.path.exists(json_path):
+            legacy_iteration_jsons.append(json_path)
+
+    if legacy_iteration_jsons:
+        raise SystemExit(
+            f"Found existing iteration splits in '{iterations_root}' but no 'cv_manifest.json'. "
+            f"This likely comes from an older run with a different fold count. "
+            f"Rename/delete '{iterations_root}' (e.g. move it to 'Iterations_legacy/') and rerun."
+        )
+
+    manifest = {
+        "total_folds": TOTAL_FOLDS,
+        "random_state": RANDOM_STATE,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(manifest_path, "w") as file:
+        json.dump(manifest, file, indent=4)
+
+
+def _load_or_create_iteration_split(
+    *,
+    iteration: int,
+    save_folder: str,
+    train_indexes: np.ndarray,
+    test_indexes: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    json_path = os.path.join(save_folder, "iteration_data.json")
+    if os.path.exists(json_path):
+        with open(json_path, "r") as file:
             data = json.load(file)
-        retrieved_train_indexes = data['Train Indexes']
+        return np.array(data["Train Indexes"], dtype=int), np.array(data["Test Indexes"], dtype=int)
 
-        p = multiprocessing.Process(target=train_regressor, args=(data_folder, save_folder, retrieved_train_indexes, min_mean_test_score, window_size))
-        p.start()
-        processes.append(p)
+    data = {
+        "Iteration": int(iteration),
+        "Train Indexes": train_indexes.tolist(),
+        "Test Indexes": test_indexes.tolist(),
+    }
+    with open(json_path, "w") as file:
+        json.dump(data, file, indent=4)
+    return train_indexes, test_indexes
 
-    for p in processes:
-        p.join()
 
-if not os.path.exists(folder + 'Iteration_0/combined_test_stats.json'):
-
-    print(' ----- TESTING CLASSIFIER AND REGRESSOR ----- ')
-    processes = []
-
-    for iteration in range(number_of_iterations):
-
-        save_folder = folder + 'Iteration_' + str(iteration) + '/'
-
-        # Reading from a JSON file and accessing data
-        with open(save_folder + 'iteration_data.json', 'r') as file:
-            data = json.load(file)
-        retrieved_test_indexes = data['Test Indexes']
-
-        p = multiprocessing.Process(target=test_classifier_regressor, args=(data_folder, save_folder, retrieved_test_indexes, min_mean_test_score, window_size))
-        p.start()
-        processes.append(p)
-
-    for p in processes:
-        p.join()
-
-folder_prefix= folder + "Iteration_"
-r2_list = []
-corrcoef_list = []
-
-for i in range(number_of_iterations):
-    folder_name = f"{folder_prefix}{i}"
-    json_file_path = os.path.join(folder_name, "combined_test_stats.json")
-
-    if os.path.exists(json_file_path):
-        with open(json_file_path, 'r') as json_file:
+def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
+    r2_list = []
+    corrcoef_list = []
+    for i in range(number_of_iterations):
+        save_folder = os.path.join(iterations_root, f"Iteration_{i}")
+        json_file_path = os.path.join(save_folder, "combined_test_stats.json")
+        if not os.path.exists(json_file_path):
+            continue
+        with open(json_file_path, "r") as json_file:
             data = json.load(json_file)
-            r2_list.append(data['Regressor Stats']['R2 Score'])
-            corrcoef_list.append(data['Best Classifier Stats']['Correlation Coefficient'])
+        r2_list.append(data["Regressor Stats"]["R2 Score"])
+        corrcoef_list.append(data["Best Classifier Stats"]["Correlation Coefficient"])
 
-average_r2_score = np.mean(r2_list)
-average_corr_score = np.mean(corrcoef_list)
+    if not r2_list or not corrcoef_list:
+        return
 
-print(f"The average r2 score for the regressor is: {average_r2_score}")
-print(f"The average correlation CPI-AHA is: {average_corr_score}")
+    average_r2_score = float(np.mean(r2_list))
+    average_corr_score = float(np.mean(corrcoef_list))
 
-results = {
-    "R2 Score List":r2_list,
-    "Correlation List":corrcoef_list,
-    "Average R2 Score": average_r2_score,
-    "Average CPI-AHA Correlation": average_corr_score
-}
+    print(f"The average r2 score for the regressor is: {average_r2_score}")
+    print(f"The average correlation CPI-AHA is: {average_corr_score}")
 
-# Writing to a JSON file
-with open(folder + 'test_results.json', 'w') as file:
-    json.dump(results, file, indent=4)
+    results = {
+        "R2 Score List": r2_list,
+        "Correlation List": corrcoef_list,
+        "Average R2 Score": average_r2_score,
+        "Average CPI-AHA Correlation": average_corr_score,
+    }
 
-if not os.path.exists(folder + 'Iteration_0/Week_stats/predictions_dataframe.csv'):
-
-    print(' ----- PLOTTING PREDICTIONS ----- ')
-    processes = []
+    with open(os.path.join(iterations_root, "test_results.json"), "w") as file:
+        json.dump(results, file, indent=4)
 
 
-    for iteration in range(number_of_iterations):
+def main() -> None:
+    # Ensure relative paths behave like before.
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        save_folder = folder + 'Iteration_' + str(iteration) + '/'
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=DEFAULT_ITERATIONS,
+        help=f"How many folds to run from a fixed {TOTAL_FOLDS}-fold CV (default: {DEFAULT_ITERATIONS}). Use 1 to run only fold 0, then rerun with higher values to compute the missing folds.",
+    )
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
 
-        with open(save_folder + 'iteration_data.json', 'r') as file:
-            data = json.load(file)
-        retrieved_test_indexes = data['Test Indexes']
+    if args.iterations < 1 or args.iterations > TOTAL_FOLDS:
+        raise SystemExit(f"--iterations must be between 1 and {TOTAL_FOLDS}")
 
-        p = multiprocessing.Process(target=plot_dashboards, args=(data_folder, save_folder, retrieved_test_indexes, min_mean_test_score, window_size))
-        
-        p.start()
-        processes.append(p)
+    methods = ["ai"] if args.debug else ["concat", "difference", "ai"]
 
-    for p in processes:
-        p.join()
+    metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
+    labels = metadata["hemi"].to_numpy()
 
-if not os.path.exists(folder + 'Scatter_AHA_CPI_Home-AHA.png'):
+    iterations_root = "Iterations_debug/" if args.debug else "Iterations/"
+    os.makedirs(iterations_root, exist_ok=True)
+    _ensure_cv_manifest(iterations_root)
 
-    print(' ----- PLOTTING CORRELATIONS ----- ')
-    iterations_folders = []
+    min_mean_test_score = 0.0 if args.debug else CV_MIN_MEAN_TEST_SCORE
 
-    for iteration in range(number_of_iterations):
+    rskf = RepeatedStratifiedKFold(
+        n_splits=TOTAL_FOLDS,
+        n_repeats=1,
+        random_state=RANDOM_STATE,
+    )
+    splits = list(rskf.split(np.empty(metadata.shape[0]), labels))
 
-        iterations_folders.append(folder + 'Iteration_' + str(iteration) + '/')
+    for iteration in range(args.iterations):
+        train_indexes, test_indexes = splits[iteration]
+        save_folder = os.path.join(iterations_root, f"Iteration_{iteration}") + "/"
+        os.makedirs(save_folder, exist_ok=True)
 
-    plot_corrcoeff(iterations_folders=iterations_folders, save_folder=folder)
+        if _iteration_done(save_folder):
+            print(f" ----- ITERATION {iteration} already completed; skipping ----- ")
+            continue
 
-print(' ----- ESECUZIONE DEL MAIN TERMINATA ----- ')
+        if args.debug:
+            rng = np.random.default_rng(RANDOM_STATE + iteration)
+            train_idx = np.array(train_indexes, dtype=int)
+            test_idx = np.array(test_indexes, dtype=int)
+
+            train_labels = labels[train_idx]
+            test_labels = labels[test_idx]
+
+            train_indexes = _subset_per_class(rng, train_idx, train_labels, n_per_class=2)
+            test_indexes = _subset_per_class(rng, test_idx, test_labels, n_per_class=1)
+
+        train_indexes, test_indexes = _load_or_create_iteration_split(
+            iteration=iteration,
+            save_folder=save_folder,
+            train_indexes=np.array(train_indexes, dtype=int),
+            test_indexes=np.array(test_indexes, dtype=int),
+        )
+
+        print(f" ----- ITERATION {iteration} / {args.iterations - 1} ----- ")
+        _run_iteration(
+            data_folder=DATA_FOLDER,
+            save_folder=save_folder,
+            train_indexes=train_indexes,
+            test_indexes=test_indexes,
+            min_mean_test_score=min_mean_test_score,
+            window_size=WINDOW_SIZE,
+            decimation_factor=DECIMATION_FACTOR,
+            methods=methods,
+        )
+
+    _aggregate_results(iterations_root, args.iterations)
+
+    scatter_plot = os.path.join(iterations_root, "Scatter_AHA_CPI_Home-AHA.png")
+    if not os.path.exists(scatter_plot):
+        iterations_folders = []
+        for i in range(args.iterations):
+            folder = os.path.join(iterations_root, f"Iteration_{i}") + "/"
+            if os.path.exists(os.path.join(folder, "Week_stats", "predictions_dataframe.csv")):
+                iterations_folders.append(folder)
+
+        if len(iterations_folders) == args.iterations:
+            plot_corrcoeff(iterations_folders=iterations_folders, save_folder=iterations_root)
+
+    print(" ----- ESECUZIONE DEL MAIN TERMINATA ----- ")
+
+
+if __name__ == "__main__":
+    main()
 
 
 """
