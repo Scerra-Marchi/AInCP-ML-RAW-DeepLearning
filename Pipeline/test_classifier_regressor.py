@@ -1,14 +1,9 @@
-import os
 import json
-import hashlib
 import numpy as np
 import pandas as pd
 import joblib as jl
 from sklearn.metrics import r2_score
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import RepeatedKFold
 from predict_samples import predict_samples
-from sklearn.model_selection import cross_val_score
 from train_regressor import regressor_hash_from_estimators_specs
 
 def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_test_score, window_size, decimation_factor):
@@ -43,7 +38,7 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
     hp_tot_list_list = []
     
     for index in test_indexes:
-        _, hp_tot, _, _= predict_samples(data_folder, estimators_list, [index])
+        _, hp_tot = predict_samples(data_folder, estimators_list, [index])
         hp_tot_list_list.append(hp_tot)
 
         #   hp_tot_list_list =                 y =

@@ -5,13 +5,11 @@ from itertools import product
 import joblib as jl
 import numpy as np
 from predict_samples import predict_samples
-import datetime as dt
 import matplotlib
 import matplotlib.pyplot as plt
-import hashlib
 import math
 from train_regressor import regressor_hash_from_estimators_specs
-#import warnings 
+from read_file import read_file
 
 
 def create_timestamps_list(data_folder):
@@ -98,7 +96,14 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
     for index in range(len(metadata)):
         subject = metadata['subject'].iloc[index]
-        predictions, hp_tot_list, magnitude_D, magnitude_ND = predict_samples(data_folder, estimators_list, [index])
+        predictions, hp_tot_list= predict_samples(data_folder, estimators_list, [index])
+        magnitude_D, magnitude_ND = read_file  (data_folder,
+                                                subject,
+                                                window_size,
+                                                decimation_factor,
+                                                input_type='week',
+                                                return_mag=1
+                                               )
         healthy_percentage.append(hp_tot_list)
         real_aha = metadata['AHA'].iloc[index]
         predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
