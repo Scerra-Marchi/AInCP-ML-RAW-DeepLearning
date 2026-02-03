@@ -1,21 +1,7 @@
 import pandas as pd
-import math
 import numpy as np
-from scipy.signal import decimate
 from elaborate_magnitude import elaborate_magnitude
 from read_file import read_file
-
-
-def decimate_df(data, factor):
-    if factor <= 1:
-        return data
-
-    df_decimated = pd.DataFrame(
-        decimate(data, factor, axis=0, ftype='fir', zero_phase=True),
-        columns=data.columns
-    ).reset_index(drop=True)
-
-    return df_decimated
 
 
 def create_windows(

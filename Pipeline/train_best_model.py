@@ -4,14 +4,9 @@ import pandas as pd
 import numpy as np
 import joblib as jl
 from sklearn.base import clone
-from sklearn.metrics import f1_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
 import sys
-
-import warnings
-warnings.filterwarnings("ignore")   #TODO: remove this line when the code is stable
-
 
 def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
     model = clone(estimator)
@@ -36,7 +31,7 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
         n_jobs=1,
         return_train_score=True,
         verbose=3,
-        scoring="f1_weighted",
+        scoring="f1_macro",
     )
     parameter_tuning_method.fit(X, y)
 

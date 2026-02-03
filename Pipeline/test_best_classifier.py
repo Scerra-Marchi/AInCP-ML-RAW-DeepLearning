@@ -1,11 +1,7 @@
-import os
-import hashlib
 import json
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import joblib as jl
-from sklearn.metrics import r2_score
 from predict_samples import predict_samples
 
 def test_best_classifier(data_folder, save_folder, subjects_indexes):

@@ -6,12 +6,9 @@ def elaborate_magnitude(operation_type, D, ND):
     """
 
     # Magnitude (lazy: solo se serve)
-    if operation_type in ('concat', 'difference', 'ai', 'enmo', 'magnitude'):
+    if operation_type in ('concat', 'difference', 'ai', 'enmo'):
         mag_D = np.linalg.norm(D, axis=2)
         mag_ND = np.linalg.norm(ND, axis=2)
-        #TODO: check this shiet
-        if operation_type == 'magnitude':
-            return np.concatenate((mag_D, mag_ND), axis=2)
 
     if operation_type == 'concat':
         return np.concatenate((mag_D, mag_ND), axis=1)
