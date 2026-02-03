@@ -6,7 +6,6 @@ import joblib as jl
 from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
-import sys
 
 def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
     model = clone(estimator)
@@ -30,16 +29,12 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
         cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
         n_jobs=1,
         return_train_score=True,
-        verbose=3,
+        verbose=0,
         scoring="f1_macro",
     )
     parameter_tuning_method.fit(X, y)
 
     estimator = parameter_tuning_method.best_estimator_
-
-    # print('y = ', y)
-    # print('y_pred = ', y_pred)
-    # print('f1_score = ', f1_score(y, y_pred, average='weighted'))
 
     stats_folder = gridsearch_folder + 'GridSearchCV_stats/'
     os.makedirs(stats_folder, exist_ok = True)
@@ -60,6 +55,3 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
 
     os.makedirs(gridsearch_folder, exist_ok=True)
     jl.dump(estimator, os.path.join(gridsearch_folder, "best_estimator.joblib"))
-    print('Best estimator saved\n\n------------------------------------------------\n')
-    sys.stdout.flush()
-    sys.stderr.flush()

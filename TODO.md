@@ -10,20 +10,20 @@
 - [ ] E non ce la vogliamo mettere un'altra rete neurale al posto del regressore? (da serie temporale anzichè percentuale)
 - [ ] Che preprocessing fare ai dati RAW e che windowsize usare? (anna, sofia)
 - [ ] E I DATI? (path di sotto)
-- [ ] controllare il parallelismo (quel -1 di njobs)
+- [x] controllare il parallelismo (quel -1 di njobs)
 - [x] controllare quella storia del numero che non torna di anna e i tre grafici della correlazione finale
 - [ ] sbarazzarsi anche della grid search su windowsize?
-- [ ] xk dentro predict_samples non usiamo create_windows?
-- [ ] in predict_samples esploderà la memoria perché ci salviamo la serie temporale
+- [x] xk dentro predict_samples non usiamo create_windows?
+- [x] in predict_samples esploderà la memoria perché ci salviamo la serie temporale
 - [ ] Explainability del regressore (Grosso valore aggiunto!)
     - Vedere se regressore da più peso ai classificatori che avevamo scelto per primi
 - [ ] Explainable graph dei punti dei classificatori (heatmap graph)
 - [ ] Cercare pattern per ulteriore explainability del grafico dei punti
 - [ ] Passare al regressore la serie temporale dei punti (assieme agli orari) e poi passare l'intera serie al regressore
-- [ ] Andare sui dati RAW in ogni caso
+- [x] Andare sui dati RAW in ogni caso
 
 ## TO IMPROVE
-- [ ] create_windows.py rimuovere loop se possibile, e poi read_csv problema I/O?
+- [x] create_windows.py rimuovere loop se possibile, e poi read_csv problema I/O?
 - [ ] 
 
 ## TO ADD
@@ -73,13 +73,16 @@ Per tutta la pipeline:
     - 6d raw
 ---
 
-1. Fare debug version deterministica
+1. Fare debug version deterministica OK
 2. Miglioramenti qualitativi:
-    - predict_samples deve usare create_windows (1 sola volta per elaborazione, e NON usa volta per modello)
-    - create_windows chunckare con 1 chiamata a funzione (no for riga 54)
-    - elaborate_magnitude interna a create_windows e in grado di applicare calcoli parallelamente (map?)
-3. Aggiungere modelli DeepL (senza usare getattr(importlib.import_module)): pytorch wrapped in skorch (cnn-1D, gru)
-4. Aggiungere supporto a GPU (?)
-5. Testare sui dati RAW monodimensionali (comparare con Anna e fare meeting con Prencipe)
-6. Aggiungere dati multidimensionali
+    - predict_samples deve usare create_windows (1 sola volta per elaborazione, e NON usa volta per modello) OK
+    - create_windows chunckare con 1 chiamata a funzione (no for riga 54) OK
+    - elaborate_magnitude interna a create_windows e in grado di applicare calcoli parallelamente (map?) OK
+3. Aggiungere modelli DeepL (senza usare getattr(importlib.import_module)): pytorch wrapped in skorch (cnn-1D, gru) OK
+4. Aggiungere supporto a GPU (?) OK
+5. Testare sui dati RAW monodimensionali (comparare con Anna e fare meeting con Prencipe) OK
+6. Aggiungere dati multidimensionali OK
 7. Fare explainability del regressore (Vedi disegno su discord)
+
+8. move classifier models stuff from train_select_classifiers to skorch_models
+9. Keep or remove the gridsearch_specs_list=None param inside train_select_classifier?

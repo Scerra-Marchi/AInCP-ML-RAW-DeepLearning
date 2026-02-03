@@ -161,7 +161,12 @@ def train_select_classifiers(
     from ray import tune
     from ray.tune import RunConfig
 
-    spec_indices = list(range(len(gridsearch_specs_list)))
+    model_names = [spec["name"] for spec in gridsearch_specs_list]
+    if len(set(model_names)) != len(model_names):
+        raise ValueError(
+            "Each entry in gridsearch_specs_list must have a unique 'name' so Ray trials can be labeled clearly."
+        )
+    model_name_to_idx = {name: idx for idx, name in enumerate(model_names)}
 
     def _ray_train_best_model(
         config,
@@ -169,12 +174,14 @@ def train_select_classifiers(
         data_folder,
         subjects_indexes,
         gridsearch_specs_list,
+        model_name_to_idx,
     ):
         # Ray Tune trainable: receives one point in the Cartesian product.
         method = config["method"]
         window_size = int(config["window_size"])
         decimation_factor = int(config["decimation_factor"])
-        spec_idx = int(config["spec_idx"])
+        model_name = config["model_name"]
+        spec_idx = model_name_to_idx[model_name]
 
         gridsearch_specs = gridsearch_specs_list[spec_idx]
         gridsearch_folder = _gridsearch_folder_for_task(method, window_size, decimation_factor, gridsearch_specs)
@@ -224,19 +231,43 @@ def train_select_classifiers(
         data_folder=data_folder,
         subjects_indexes=subjects_indexes,
         gridsearch_specs_list=gridsearch_specs_list,
+        model_name_to_idx=model_name_to_idx,
     )
 
     param_space = {
         "method": tune.grid_search(l_method),
         "window_size": tune.grid_search(l_window_size),
         "decimation_factor": tune.grid_search(l_decimation_factor),
-        "spec_idx": tune.grid_search(spec_indices),
+        "model_name": tune.grid_search(model_names),
     }
+
+    def _trial_name_creator(trial) -> str:
+        config = getattr(trial, "config", {}) or {}
+        model_name = _safe_model_name(str(config.get("model_name", "model")))
+        trial_id = str(getattr(trial, "trial_id", "trial"))
+        return f"{model_name}_{trial_id}"
+
+    def _trial_dirname_creator(trial) -> str:
+        return _safe_model_name(_trial_name_creator(trial))
+
+    tuner_kwargs = {
+        # One Ray trial per Cartesian point (some will early-exit if already trained).
+        "param_space": param_space,
+        "run_config": RunConfig(name="train_select_classifiers", verbose=1),
+    }
+    TuneConfig = getattr(tune, "TuneConfig", None)
+    if TuneConfig is not None:
+        try:
+            tuner_kwargs["tune_config"] = TuneConfig(
+                trial_name_creator=_trial_name_creator,
+                trial_dirname_creator=_trial_dirname_creator,
+            )
+        except TypeError:
+            tuner_kwargs["tune_config"] = TuneConfig(trial_name_creator=_trial_name_creator)
+
     tuner = tune.Tuner(
         tune.with_resources(trainable, resources),
-        # One Ray trial per Cartesian point (some will early-exit if already trained).
-        param_space=param_space,
-        run_config=RunConfig(name="train_select_classifiers", verbose=1),
+        **tuner_kwargs,
     )
     result_grid = tuner.fit()
     ray.shutdown()
@@ -251,7 +282,8 @@ def train_select_classifiers(
         method = config["method"]
         window_size = int(config["window_size"])
         decimation_factor = int(config["decimation_factor"])
-        spec_idx = int(config["spec_idx"])
+        model_name = config["model_name"]
+        spec_idx = model_name_to_idx[model_name]
 
         gridsearch_specs = gridsearch_specs_list[spec_idx]
         gridsearch_folder = _gridsearch_folder_for_task(method, window_size, decimation_factor, gridsearch_specs)
