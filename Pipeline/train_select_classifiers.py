@@ -16,6 +16,8 @@ import random
 import torch
 from torch import nn
 from skorch import NeuralNetClassifier
+from skorch.callbacks import EarlyStopping
+from skorch.dataset import ValidSplit
 from skorch_models import (
     Conv1DSequenceClassifier,
     GRUSequenceClassifier,
@@ -56,13 +58,32 @@ def train_select_classifiers(
         # Default model specs used when the caller doesn't provide their own list.
         # NOTE: device selection is passed into skorch (not into the PyTorch modules directly).
         device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        def _default_callbacks():
+            # Create fresh callback objects per estimator to avoid shared state across clones/fits.
+            return [
+                (
+                    "early_stopping",
+                    EarlyStopping(
+                        monitor="valid_loss",
+                        patience=15,
+                        threshold=1e-4,
+                        threshold_mode="rel",
+                        lower_is_better=True,
+                        load_best=True,
+                    ),
+                )
+            ]
+
         skorch_common = {
             "criterion": nn.CrossEntropyLoss,
-            "max_epochs": 200,
+            "max_epochs": 100,
             "lr": 1e-3,
             "batch_size": 64,
+            "optimizer": torch.optim.AdamW,
             "iterator_train__shuffle": True,
-            "train_split": None,
+            # Keep a small validation split inside each CV fold so we can use early stopping.
+            "train_split": ValidSplit(0.2, stratified=True, random_state=42),
             "device": device,
             "verbose": 0,
         }
@@ -70,64 +91,116 @@ def train_select_classifiers(
         gridsearch_specs_list = [
             {
                 "name": "LSTM",
-                # skorch wrapper around a local PyTorch module (LSTMSequenceClassifier).
-                "estimator": NeuralNetClassifier(module=LSTMSequenceClassifier, **skorch_common),
+                "estimator": NeuralNetClassifier(
+                    module=LSTMSequenceClassifier,
+                    callbacks=_default_callbacks(),
+                    **skorch_common,
+                ),
                 "param_grid": {
-                    "lr": [1e-3],
-                    "module__hidden_size": [16],
+                    "optimizer__weight_decay": [0.0, 1e-4],
+                    "lr": [3e-4, 1e-3],
+                    "module__hidden_size": [32, 64],
+                    "module__num_layers": [1, 2],
+                    "module__dropout": [0.0, 0.2],
+                    "module__bidirectional": [False, True],
                 },
             },
             {
                 "name": "GRU",
-                "estimator": NeuralNetClassifier(module=GRUSequenceClassifier, **skorch_common),
+                "estimator": NeuralNetClassifier(
+                    module=GRUSequenceClassifier,
+                    callbacks=_default_callbacks(),
+                    **skorch_common,
+                ),
                 "param_grid": {
-                    "lr": [1e-3],
-                    "module__hidden_size": [16],
+                    "optimizer__weight_decay": [0.0, 1e-4],
+                    "lr": [3e-4, 1e-3],
+                    "module__hidden_size": [32, 64],
+                    "module__num_layers": [1, 2],
+                    "module__dropout": [0.0, 0.2],
+                    "module__bidirectional": [False, True],
                 },
             },
             {
                 "name": "RNN",
-                "estimator": NeuralNetClassifier(module=RNNSequenceClassifier, **skorch_common),
+                "estimator": NeuralNetClassifier(
+                    module=RNNSequenceClassifier,
+                    callbacks=_default_callbacks(),
+                    **skorch_common,
+                ),
                 "param_grid": {
-                    "lr": [1e-3],
-                    "module__hidden_size": [16],
+                    "optimizer__weight_decay": [0.0, 1e-4],
+                    "lr": [3e-4, 1e-3],
+                    "module__hidden_size": [32, 64],
+                    "module__num_layers": [1, 2],
+                    "module__dropout": [0.0, 0.2],
+                    "module__bidirectional": [False],
+                    "module__nonlinearity": ["tanh", "relu"],
                 },
             },
             {
                 "name": "CNN1D",
-                "estimator": NeuralNetClassifier(module=Conv1DSequenceClassifier, **skorch_common),
+                "estimator": NeuralNetClassifier(
+                    module=Conv1DSequenceClassifier,
+                    callbacks=_default_callbacks(),
+                    **skorch_common,
+                ),
                 "param_grid": {
-                    "lr": [1e-3],
-                    "module__channels": [16],
-                    "module__kernel_size": [5],
+                    "optimizer__weight_decay": [0.0, 1e-4],
+                    "lr": [3e-4, 1e-3],
+                    "module__channels": [16, 32, 64],
+                    "module__kernel_size": [5, 7],
+                    "module__dropout": [0.0, 0.3],
                 },
             },
             {
                 "name": "Transformer",
                 "estimator": NeuralNetClassifier(
                     module=TransformerSequenceClassifier,
-                    # Transformers can be heavier; use shorter training by default here.
-                    **{**skorch_common, "max_epochs": 3, "batch_size": 32},
+                    callbacks=_default_callbacks(),
+                    **skorch_common,
                 ),
-                "param_grid": {
-                    "lr": [1e-3],
-                    "module__d_model": [32],
-                    "module__nhead": [4],
-                    "module__num_layers": [2],
-                    "module__patch_size": [32],
-                },
+                # Use a list of grids to avoid invalid (d_model, nhead) combinations.
+                "param_grid": [
+                    {
+                        "optimizer__weight_decay": [1e-4],
+                        "lr": [3e-4, 1e-3],
+                        "batch_size": [16, 32],
+                        "module__d_model": [32],
+                        "module__nhead": [4, 8],
+                        "module__num_layers": [2, 3],
+                        "module__dim_feedforward": [128],
+                        "module__dropout": [0.1],
+                        "module__patch_size": [32],
+                    },
+                    {
+                        "optimizer__weight_decay": [1e-4],
+                        "lr": [3e-4, 1e-3],
+                        "batch_size": [16, 32],
+                        "module__d_model": [64],
+                        "module__nhead": [8],
+                        "module__num_layers": [2, 3],
+                        "module__dim_feedforward": [256],
+                        "module__dropout": [0.1],
+                        "module__patch_size": [32],
+                    },
+                ],
             },
             {
                 "name": "Reservoir",
                 "estimator": NeuralNetClassifier(
                     module=ReservoirSequenceClassifier,
-                    # Reservoir-based models are also kept short by default.
-                    **{**skorch_common, "max_epochs": 3, "batch_size": 64},
+                    callbacks=_default_callbacks(),
+                    **skorch_common,
                 ),
                 "param_grid": {
+                    "optimizer__weight_decay": [0.0],
                     "lr": [1e-3],
-                    "module__reservoir_size": [200],
-                    "module__downsample": [16],
+                    "module__reservoir_size": [200, 400],
+                    "module__spectral_radius": [0.8, 0.9, 1.0],
+                    "module__leak_rate": [1.0],
+                    "module__input_scaling": [0.2, 0.5],
+                    "module__downsample": [8, 16],
                 },
             },
         ]
@@ -222,7 +295,7 @@ def train_select_classifiers(
     )
 
     # Allocate one GPU per trial when available; otherwise allocate one CPU per trial for parallelism.
-    resources = {"gpu": 1, "cpu": 1} if torch.cuda.is_available() else {"cpu": 1}
+    resources = {"gpu": 1, "cpu": 8} if torch.cuda.is_available() else {"cpu": 1}
 
     # Bind constant parameters once; Ray will vary only the grid_search dimensions in `param_space`.
     trainable = tune.with_parameters(

@@ -82,7 +82,13 @@ Per tutta la pipeline:
 4. Aggiungere supporto a GPU (?) OK
 5. Testare sui dati RAW monodimensionali (comparare con Anna e fare meeting con Prencipe) OK
 6. Aggiungere dati multidimensionali OK
+
+Da fixare:
+- Togliere errore/warning delle metriche
+- Togliere _trial_dirname_creator (il campo model_name è sufficiente)
+- Unificare main_train_plot e main_whole_assessment (debug mode super leggera!)
+
 7. Fare explainability del regressore (Vedi disegno su discord)
 
-8. move classifier models stuff from train_select_classifiers to skorch_models
-9. Keep or remove the gridsearch_specs_list=None param inside train_select_classifier?
+- move classifier models stuff from train_select_classifiers to skorch_models
+- Keep or remove the gridsearch_specs_list=None param inside train_select_classifier?
