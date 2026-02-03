@@ -63,7 +63,7 @@ if not os.path.exists(save_folder):
         save_folder=save_folder,
         subjects_indexes=train_indexes,
         l_window_size=l_window_size,
-        l_method=['ai'] if args.debug else ['concat', 'difference', 'ai'],
+        l_method=['ai', 'enmo', 'raw'] if args.debug else ['concat', 'difference', 'ai', 'enmo', 'raw'],
         l_decimation_factor=l_decimation_factor
     )
     
