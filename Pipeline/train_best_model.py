@@ -14,18 +14,9 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
     X = np.asarray(X)
     y = np.asarray(y)
 
-    effective_param_grid = dict(param_grid)
-    n_features = int(X.shape[-1]) if X.ndim == 3 else 1
-    model_params = model.get_params(deep=True)
-    if "module__input_size" in model_params and "module__input_size" not in effective_param_grid:
-        effective_param_grid["module__input_size"] = [n_features]
-    if "module__in_channels" in model_params and "module__in_channels" not in effective_param_grid:
-        effective_param_grid["module__in_channels"] = [n_features]
- 
-    #                                                             dobbiamo fixare il seed? FATTP
     parameter_tuning_method = GridSearchCV(
         model,
-        effective_param_grid,
+        param_grid,
         cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
         n_jobs=1,
         return_train_score=True,
