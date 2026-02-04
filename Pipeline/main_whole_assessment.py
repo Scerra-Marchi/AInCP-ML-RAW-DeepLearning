@@ -1,7 +1,7 @@
 import argparse
 import json
 import os
-from datetime import datetime, timezone
+import shutil
 from typing import Iterable, Tuple
 
 import numpy as np
@@ -102,58 +102,9 @@ def _run_iteration(
 
 
 def _iteration_done(save_folder: str) -> bool:
-    # "Done" means we have both the stats and the plots that plot_corrcoeff consumes.
-    iteration_json = os.path.join(save_folder, "iteration_data.json")
-    combined_test_stats = os.path.join(save_folder, "combined_test_stats.json")
+    # The dashboard CSV is produced last; if it exists, the iteration is complete.
     predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
-    return (
-        os.path.exists(iteration_json)
-        and os.path.exists(combined_test_stats)
-        and os.path.exists(predictions_df)
-    )
-
-
-def _ensure_cv_manifest(iterations_root: str) -> None:
-    manifest_path = os.path.join(iterations_root, "cv_manifest.json")
-    if os.path.exists(manifest_path):
-        with open(manifest_path, "r") as file:
-            manifest = json.load(file)
-
-        total_folds = int(manifest.get("total_folds", -1))
-        random_state = int(manifest.get("random_state", -1))
-        if total_folds != TOTAL_FOLDS or random_state != RANDOM_STATE:
-            raise SystemExit(
-                f"Incompatible CV manifest in '{iterations_root}'. "
-                f"Expected total_folds={TOTAL_FOLDS}, random_state={RANDOM_STATE}; "
-                f"found total_folds={total_folds}, random_state={random_state}. "
-                f"Rename/delete '{iterations_root}' to start a new run."
-            )
-        return
-
-    # If a legacy Iterations folder exists (created with a different number of folds),
-    # fail fast to avoid mixing splits.
-    legacy_iteration_jsons = []
-    for name in os.listdir(iterations_root):
-        if not name.startswith("Iteration_"):
-            continue
-        json_path = os.path.join(iterations_root, name, "iteration_data.json")
-        if os.path.exists(json_path):
-            legacy_iteration_jsons.append(json_path)
-
-    if legacy_iteration_jsons:
-        raise SystemExit(
-            f"Found existing iteration splits in '{iterations_root}' but no 'cv_manifest.json'. "
-            f"This likely comes from an older run with a different fold count. "
-            f"Rename/delete '{iterations_root}' (e.g. move it to 'Iterations_legacy/') and rerun."
-        )
-
-    manifest = {
-        "total_folds": TOTAL_FOLDS,
-        "random_state": RANDOM_STATE,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    with open(manifest_path, "w") as file:
-        json.dump(manifest, file, indent=4)
+    return os.path.exists(predictions_df)
 
 
 def _load_or_create_iteration_split(
@@ -223,22 +174,32 @@ def main() -> None:
         default=DEFAULT_ITERATIONS,
         help=f"How many folds to run from a fixed {TOTAL_FOLDS}-fold CV (default: {DEFAULT_ITERATIONS}). Use 1 to run only fold 0, then rerun with higher values to compute the missing folds.",
     )
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--reset-iterations",
+        action="store_true",
+        help="Delete the entire Iterations/ or Iterations_debug/ folder before running.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run a tiny stratified subset per fold for quick sanity checks.",
+    )
     args = parser.parse_args()
 
     if args.iterations < 1 or args.iterations > TOTAL_FOLDS:
         raise SystemExit(f"--iterations must be between 1 and {TOTAL_FOLDS}")
 
-    methods = ["ai"] if args.debug else ["concat", "difference", "ai"]
+    methods = ["raw"] if args.debug else ['concat', 'difference', 'ai', 'enmo', 'raw']
 
     metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
     labels = metadata["hemi"].to_numpy()
 
     iterations_root = "Iterations_debug/" if args.debug else "Iterations/"
+    if args.reset_iterations and os.path.isdir(iterations_root):
+        shutil.rmtree(iterations_root)
     os.makedirs(iterations_root, exist_ok=True)
-    _ensure_cv_manifest(iterations_root)
 
-    min_mean_test_score = 0.0 if args.debug else CV_MIN_MEAN_TEST_SCORE
+    min_mean_test_score = 0.5 if args.debug else CV_MIN_MEAN_TEST_SCORE
 
     rskf = RepeatedStratifiedKFold(
         n_splits=TOTAL_FOLDS,
@@ -288,16 +249,14 @@ def main() -> None:
 
     _aggregate_results(iterations_root, args.iterations)
 
-    scatter_plot = os.path.join(iterations_root, "Scatter_AHA_CPI_Home-AHA.png")
-    if not os.path.exists(scatter_plot):
-        iterations_folders = []
-        for i in range(args.iterations):
-            folder = os.path.join(iterations_root, f"Iteration_{i}") + "/"
-            if os.path.exists(os.path.join(folder, "Week_stats", "predictions_dataframe.csv")):
-                iterations_folders.append(folder)
+    iterations_folders = []
+    for i in range(args.iterations):
+        folder = os.path.join(iterations_root, f"Iteration_{i}") + "/"
+        if os.path.exists(os.path.join(folder, "Week_stats", "predictions_dataframe.csv")):
+            iterations_folders.append(folder)
 
-        if len(iterations_folders) == args.iterations:
-            plot_corrcoeff(iterations_folders=iterations_folders, save_folder=iterations_root)
+    if len(iterations_folders) == args.iterations:
+        plot_corrcoeff(iterations_folders=iterations_folders, save_folder=iterations_root)
 
     print(" ----- ESECUZIONE DEL MAIN TERMINATA ----- ")
 
