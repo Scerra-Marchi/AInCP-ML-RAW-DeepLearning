@@ -1,9 +1,0 @@
-{
-    "Best index": 0,
-    "Best score": 0.75,
-    "Refit time": 3.249336004257202,
-    "Best params": {
-        "lr": 0.001,
-        "module__hidden_size": 16
-    }
-}
