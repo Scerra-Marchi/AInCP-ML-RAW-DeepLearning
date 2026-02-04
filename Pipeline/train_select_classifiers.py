@@ -310,33 +310,11 @@ def train_select_classifiers(
         "model_name": tune.grid_search(model_names),
     }
 
-    def _trial_name_creator(trial) -> str:
-        config = getattr(trial, "config", {}) or {}
-        model_name = _safe_model_name(str(config.get("model_name", "model")))
-        trial_id = str(getattr(trial, "trial_id", "trial"))
-        return f"{model_name}_{trial_id}"
-
-    def _trial_dirname_creator(trial) -> str:
-        return _safe_model_name(_trial_name_creator(trial))
-
-    tuner_kwargs = {
-        # One Ray trial per Cartesian point (some will early-exit if already trained).
-        "param_space": param_space,
-        "run_config": RunConfig(name="train_select_classifiers", verbose=1),
-    }
-    TuneConfig = getattr(tune, "TuneConfig", None)
-    if TuneConfig is not None:
-        try:
-            tuner_kwargs["tune_config"] = TuneConfig(
-                trial_name_creator=_trial_name_creator,
-                trial_dirname_creator=_trial_dirname_creator,
-            )
-        except TypeError:
-            tuner_kwargs["tune_config"] = TuneConfig(trial_name_creator=_trial_name_creator)
-
     tuner = tune.Tuner(
         tune.with_resources(trainable, resources),
-        **tuner_kwargs,
+        # One Ray trial per Cartesian point (some will early-exit if already trained).
+        param_space=param_space,
+        run_config=RunConfig(name="train_select_classifiers", verbose=1),
     )
     result_grid = tuner.fit()
     ray.shutdown()
