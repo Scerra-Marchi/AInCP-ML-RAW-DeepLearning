@@ -287,15 +287,11 @@ def train_select_classifiers(
             decimation_factor,
         )
 
-    # Start (or connect to) a Ray runtime. When GPUs are available, expose them to Ray for scheduling.
-    ray.init(
-        ignore_reinit_error=True,
-        log_to_driver=True,
-        num_gpus=(torch.cuda.device_count() if torch.cuda.is_available() else 0),
-    )
+    # Start (or connect to) a Ray runtime.
+    ray.init(include_dashboard=False)
 
-    # Allocate one GPU per trial when available; otherwise allocate one CPU per trial for parallelism.
-    resources = {"gpu": 1, "cpu": 8} if torch.cuda.is_available() else {"cpu": 1}
+    # Allocate one GPU per trial when available; otherwise allocate all CPU cores to a single trial.
+    resources = {"gpu": 1, "cpu": 8} if torch.cuda.is_available() else {"cpu": os.cpu_count()}
 
     # Bind constant parameters once; Ray will vary only the grid_search dimensions in `param_space`.
     trainable = tune.with_parameters(
