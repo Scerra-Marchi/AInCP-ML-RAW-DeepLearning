@@ -189,7 +189,7 @@ def main() -> None:
     if args.iterations < 1 or args.iterations > TOTAL_FOLDS:
         raise SystemExit(f"--iterations must be between 1 and {TOTAL_FOLDS}")
 
-    methods = ["ai"] if args.debug else ["concat", "difference", "ai"]
+    methods = ["raw"] if args.debug else ['concat', 'difference', 'ai', 'enmo', 'raw']
 
     metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
     labels = metadata["hemi"].to_numpy()
@@ -199,7 +199,7 @@ def main() -> None:
         shutil.rmtree(iterations_root)
     os.makedirs(iterations_root, exist_ok=True)
 
-    min_mean_test_score = 0.0 if args.debug else CV_MIN_MEAN_TEST_SCORE
+    min_mean_test_score = 0.5 if args.debug else CV_MIN_MEAN_TEST_SCORE
 
     rskf = RepeatedStratifiedKFold(
         n_splits=TOTAL_FOLDS,
