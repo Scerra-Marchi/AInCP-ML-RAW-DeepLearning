@@ -291,7 +291,7 @@ def train_select_classifiers(
     ray.init(include_dashboard=False)
 
     # Allocate one GPU per trial when available; otherwise allocate all CPU cores to a single trial.
-    resources = {"gpu": 1, "cpu": 8} if torch.cuda.is_available() else {"cpu": os.cpu_count()}
+    resources = {"gpu": 1, "cpu": max(1, (os.cpu_count() or 1) // max(1, torch.cuda.device_count()))} if torch.cuda.is_available() else {"cpu": os.cpu_count() or 1}
 
     # Bind constant parameters once; Ray will vary only the grid_search dimensions in `param_space`.
     trainable = tune.with_parameters(
