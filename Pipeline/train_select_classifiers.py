@@ -15,7 +15,7 @@ import pandas as pd
 import random
 import torch
 from torch import nn
-from skorch import NeuralNetClassifier
+from skorch import NeuralNetBinaryClassifier
 from skorch.callbacks import EarlyStopping
 from skorch.dataset import ValidSplit
 from skorch_models import (
@@ -26,6 +26,7 @@ from skorch_models import (
     ReservoirSequenceClassifier,
     TransformerSequenceClassifier,
 )
+from ray.tune import TuneConfig
 
 
 def _safe_model_name(name: str) -> str:
@@ -80,27 +81,21 @@ def train_select_classifiers(
                     ),
                 )
             ]
-
-        skorch_common = {
-            "criterion": nn.BCEWithLogitsLoss,
-            "criterion__pos_weight": pos_weight,
-            "max_epochs": 100,
-            "lr": 1e-3,
-            "batch_size": 64,
-            "optimizer": torch.optim.AdamW,
-            "iterator_train__shuffle": True,
-            # Keep a small validation split inside each CV fold so we can use early stopping.
-            "train_split": ValidSplit(0.2, stratified=True, random_state=42),
-            "device": device,
-            "verbose": 0,
-        }
         
         def make_bce_net(module):
-            net = NeuralNetClassifier(
+            net = NeuralNetBinaryClassifier(
                 module=module,
                 callbacks=_default_callbacks(),
-                predict_nonlinearity=torch.sigmoid,
-                **skorch_common,
+                criterion=nn.BCEWithLogitsLoss,
+                criterion__pos_weight=pos_weight,
+                max_epochs=100,
+                lr=1e-3,
+                batch_size=64,
+                optimizer=torch.optim.AdamW,
+                iterator_train__shuffle=True,
+                train_split=ValidSplit(0.2, stratified=True, random_state=42),
+                device=device,
+                verbose=0,
             )
             net.threshold = 0.5
             return net
@@ -305,9 +300,11 @@ def train_select_classifiers(
 
     tuner = tune.Tuner(
         tune.with_resources(trainable, resources),
-        # One Ray trial per Cartesian point (some will early-exit if already trained).
         param_space=param_space,
-        run_config=RunConfig(name="train_select_classifiers", verbose=1),
+        tune_config=TuneConfig(
+            trial_dirname_creator=lambda t: f"trial_{t.trial_id}"
+        ),
+        run_config=RunConfig(name="tsc"),
     )
     result_grid = tuner.fit()
     ray.shutdown()

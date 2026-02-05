@@ -47,7 +47,8 @@ def predict_samples(data_folder, estimators, subject_indexes):
 
         X = es['series']
         y = np.asarray(es['estimator'].predict(X))
-
+        y = y.astype(np.int16)
+        
         cluster_healthy_samples = int(np.sum(y == 0))     # Non emiplegici
         cluster_hemiplegic_samples = int(np.sum(y == 1))  # Emiplegici
         # Apply bitmap: overwrite invalid windows with 0
