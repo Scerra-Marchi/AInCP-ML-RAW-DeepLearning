@@ -58,6 +58,17 @@ def train_select_classifiers(
         # Default model specs used when the caller doesn't provide their own list.
         # NOTE: device selection is passed into skorch (not into the PyTorch modules directly).
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        if hasattr(subjects_indexes, "tolist"):
+            subjects_indexes = subjects_indexes.tolist()
+        metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
+        class_labels = (metadata["hemi"].to_numpy() - 1).astype(int)
+        class_counts = pd.Series(class_labels).value_counts().sort_index()
+        n_classes = int(class_counts.index.max()) + 1
+        total = int(class_counts.sum())
+        class_weights = torch.tensor(
+            [total / (n_classes * max(int(class_counts.get(i, 0)), 1)) for i in range(n_classes)],
+            dtype=torch.float32,
+        ).to(device)
 
         def _default_callbacks():
             # Create fresh callback objects per estimator to avoid shared state across clones/fits.
@@ -77,6 +88,7 @@ def train_select_classifiers(
 
         skorch_common = {
             "criterion": nn.CrossEntropyLoss,
+            "criterion__weight": class_weights,
             "max_epochs": 100,
             "lr": 1e-3,
             "batch_size": 64,
