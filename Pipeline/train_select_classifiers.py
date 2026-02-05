@@ -58,17 +58,12 @@ def train_select_classifiers(
         # Default model specs used when the caller doesn't provide their own list.
         # NOTE: device selection is passed into skorch (not into the PyTorch modules directly).
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        if hasattr(subjects_indexes, "tolist"):
-            subjects_indexes = subjects_indexes.tolist()
+        
         metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
-        class_labels = (metadata["hemi"].to_numpy() - 1).astype(int)
-        class_counts = pd.Series(class_labels).value_counts().sort_index()
-        n_classes = int(class_counts.index.max()) + 1
-        total = int(class_counts.sum())
-        class_weights = torch.tensor(
-            [total / (n_classes * max(int(class_counts.get(i, 0)), 1)) for i in range(n_classes)],
-            dtype=torch.float32,
-        ).to(device)
+        
+        labels = torch.as_tensor(metadata["hemi"].to_numpy() - 1, dtype=torch.long)
+        counts = torch.bincount(labels, minlength=2)
+        pos_weight = (counts[0] / counts[1]).to(device)
 
         def _default_callbacks():
             # Create fresh callback objects per estimator to avoid shared state across clones/fits.
@@ -87,8 +82,8 @@ def train_select_classifiers(
             ]
 
         skorch_common = {
-            "criterion": nn.CrossEntropyLoss,
-            "criterion__weight": class_weights,
+            "criterion": nn.BCEWithLogitsLoss,
+            "criterion__pos_weight": pos_weight,
             "max_epochs": 100,
             "lr": 1e-3,
             "batch_size": 64,
@@ -99,15 +94,21 @@ def train_select_classifiers(
             "device": device,
             "verbose": 0,
         }
+        
+        def make_bce_net(module):
+            net = NeuralNetClassifier(
+                module=module,
+                callbacks=_default_callbacks(),
+                predict_nonlinearity=torch.sigmoid,
+                **skorch_common,
+            )
+            net.threshold = 0.5
+            return net
 
         gridsearch_specs_list = [
             {
                 "name": "LSTM",
-                "estimator": NeuralNetClassifier(
-                    module=LSTMSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(LSTMSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -119,11 +120,7 @@ def train_select_classifiers(
             },
             {
                 "name": "GRU",
-                "estimator": NeuralNetClassifier(
-                    module=GRUSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(GRUSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -135,11 +132,7 @@ def train_select_classifiers(
             },
             {
                 "name": "RNN",
-                "estimator": NeuralNetClassifier(
-                    module=RNNSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(RNNSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -152,11 +145,7 @@ def train_select_classifiers(
             },
             {
                 "name": "CNN1D",
-                "estimator": NeuralNetClassifier(
-                    module=Conv1DSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(Conv1DSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -167,11 +156,7 @@ def train_select_classifiers(
             },
             {
                 "name": "Transformer",
-                "estimator": NeuralNetClassifier(
-                    module=TransformerSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(TransformerSequenceClassifier),
                 # Use a list of grids to avoid invalid (d_model, nhead) combinations.
                 "param_grid": [
                     {
@@ -200,11 +185,7 @@ def train_select_classifiers(
             },
             {
                 "name": "Reservoir",
-                "estimator": NeuralNetClassifier(
-                    module=ReservoirSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(ReservoirSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0],
                     "lr": [1e-3],

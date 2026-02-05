@@ -12,7 +12,9 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
 
     X, _, _, y, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
     X = np.asarray(X)
-    y = np.asarray(y)
+    # lo trasformiamo in float per utilizzare la BCE
+    y = np.asarray(y, dtype=np.float32)
+
 
     parameter_tuning_method = GridSearchCV(
         model,
@@ -21,7 +23,7 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
         n_jobs=1,
         return_train_score=True,
         verbose=0,
-        scoring="f1_macro",
+        scoring="balanced_accuracy"
     )
     parameter_tuning_method.fit(X, y)
 
