@@ -13,7 +13,6 @@ class LSTMSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
-        num_classes: int = 2,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -23,7 +22,7 @@ class LSTMSequenceClassifier(nn.Module):
 
         self.lstm = None
         direction_factor = 2 if bidirectional else 1
-        self.classifier = nn.Linear(hidden_size * direction_factor, num_classes)
+        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
 
     def _build_lstm(self, input_size, device):
         self.lstm = nn.LSTM(
@@ -44,7 +43,8 @@ class LSTMSequenceClassifier(nn.Module):
             self._build_lstm(x.shape[-1], x.device)
 
         out, _ = self.lstm(x)
-        return self.classifier(out[:, -1])
+        return self.classifier(out[:, -1]).squeeze(-1)
+
 
 
 class GRUSequenceClassifier(nn.Module):
@@ -55,7 +55,6 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
-        num_classes: int = 2,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -65,7 +64,7 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
-        self.classifier = nn.Linear(hidden_size * direction_factor, num_classes)
+        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
 
     def _build_gru(self, input_size, device):
         self.gru = nn.GRU(
@@ -86,7 +85,8 @@ class GRUSequenceClassifier(nn.Module):
             self._build_gru(x.shape[-1], x.device)
 
         out, _ = self.gru(x)
-        return self.classifier(out[:, -1])
+        return self.classifier(out[:, -1]).squeeze(-1)
+
 
 
 
@@ -99,7 +99,6 @@ class RNNSequenceClassifier(nn.Module):
         dropout: float = 0.0,
         bidirectional: bool = False,
         nonlinearity: str = "tanh",
-        num_classes: int = 2,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -110,7 +109,7 @@ class RNNSequenceClassifier(nn.Module):
 
         self.rnn = None
         direction_factor = 2 if bidirectional else 1
-        self.classifier = nn.Linear(hidden_size * direction_factor, num_classes)
+        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
 
     def _build_rnn(self, input_size, device):
         self.rnn = nn.RNN(
@@ -132,7 +131,8 @@ class RNNSequenceClassifier(nn.Module):
             self._build_rnn(x.shape[-1], x.device)
 
         out, _ = self.rnn(x)
-        return self.classifier(out[:, -1])
+        return self.classifier(out[:, -1]).squeeze(-1)
+
 
 
 
@@ -143,16 +143,14 @@ class Conv1DSequenceClassifier(nn.Module):
         channels: int = 32,
         kernel_size: int = 7,
         dropout: float = 0.1,
-        num_classes: int = 2,
     ):
         super().__init__()
         self.channels = channels
         self.kernel_size = kernel_size
-        self.dropout_p = dropout
 
         self.features = None
         self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(channels * 2, num_classes)
+        self.classifier = nn.Linear(channels * 2, 1)
 
     def _build_features(self, in_channels):
         padding = self.kernel_size // 2
@@ -177,7 +175,8 @@ class Conv1DSequenceClassifier(nn.Module):
             self.features = self.features.to(x.device)
 
         feat = self.features(x).squeeze(-1)
-        return self.classifier(self.dropout(feat))
+        return self.classifier(self.dropout(feat)).squeeze(-1)
+
 
 
 
@@ -194,7 +193,6 @@ class TransformerSequenceClassifier(nn.Module):
     def __init__(
         self,
         *,
-        num_classes: int = 2,
         d_model: int = 32,
         nhead: int = 4,
         num_layers: int = 2,
@@ -218,7 +216,7 @@ class TransformerSequenceClassifier(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
         self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(d_model, num_classes)
+        self.classifier = nn.Linear(d_model, 1)
 
     def _build_embed(self, input_size, device):
         self.embed = nn.Conv1d(
@@ -242,7 +240,8 @@ class TransformerSequenceClassifier(nn.Module):
         pos = _sinusoidal_positional_encoding(tokens.shape[1], tokens.shape[2], tokens.device)
         encoded = self.encoder(tokens + pos.unsqueeze(0))
         pooled = self.dropout(encoded.mean(dim=1))
-        return self.classifier(pooled)
+        return self.classifier(pooled).squeeze(-1)
+
 
 
 
@@ -259,7 +258,6 @@ class ReservoirSequenceClassifier(nn.Module):
     def __init__(
         self,
         *,
-        num_classes: int = 2,
         reservoir_size: int = 200,
         spectral_radius: float = 0.9,
         leak_rate: float = 1.0,
@@ -278,7 +276,7 @@ class ReservoirSequenceClassifier(nn.Module):
         self.W = None
         self.bias = None
 
-        self.classifier = nn.Linear(self.reservoir_size, num_classes)
+        self.classifier = nn.Linear(self.reservoir_size, 1)
 
     def _build_reservoir(self, input_size, device):
         W_in = (torch.rand(input_size, self.reservoir_size, device=device) * 2 - 1) * self.input_scaling
@@ -292,8 +290,6 @@ class ReservoirSequenceClassifier(nn.Module):
         self.W = W
         self.bias = torch.zeros(self.reservoir_size, device=device)
 
-
-
     def forward(self, x):
         x = x.float()
         if x.ndim == 2:
@@ -303,10 +299,7 @@ class ReservoirSequenceClassifier(nn.Module):
             x = F.avg_pool1d(x.permute(0, 2, 1), self.downsample).permute(0, 2, 1)
 
         if self.W_in is None:
-            self._build_reservoir(
-                input_size=x.shape[-1],
-                device=x.device
-            )
+            self._build_reservoir(x.shape[-1], x.device)
 
         state = x.new_zeros(x.shape[0], self.reservoir_size)
         for t in range(x.shape[1]):
@@ -314,4 +307,5 @@ class ReservoirSequenceClassifier(nn.Module):
             pre = u @ self.W_in + state @ self.W + self.bias
             state = (1 - self.leak_rate) * state + self.leak_rate * torch.tanh(pre)
 
-        return self.classifier(state)
+        return self.classifier(state).squeeze(-1)
+

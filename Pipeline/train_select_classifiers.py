@@ -15,7 +15,7 @@ import pandas as pd
 import random
 import torch
 from torch import nn
-from skorch import NeuralNetClassifier
+from skorch import NeuralNetBinaryClassifier
 from skorch.callbacks import EarlyStopping
 from skorch.dataset import ValidSplit
 from skorch_models import (
@@ -26,6 +26,7 @@ from skorch_models import (
     ReservoirSequenceClassifier,
     TransformerSequenceClassifier,
 )
+from ray.tune import TuneConfig
 
 
 def _safe_model_name(name: str) -> str:
@@ -58,17 +59,12 @@ def train_select_classifiers(
         # Default model specs used when the caller doesn't provide their own list.
         # NOTE: device selection is passed into skorch (not into the PyTorch modules directly).
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        if hasattr(subjects_indexes, "tolist"):
-            subjects_indexes = subjects_indexes.tolist()
+        
         metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
-        class_labels = (metadata["hemi"].to_numpy() - 1).astype(int)
-        class_counts = pd.Series(class_labels).value_counts().sort_index()
-        n_classes = int(class_counts.index.max()) + 1
-        total = int(class_counts.sum())
-        class_weights = torch.tensor(
-            [total / (n_classes * max(int(class_counts.get(i, 0)), 1)) for i in range(n_classes)],
-            dtype=torch.float32,
-        ).to(device)
+        
+        labels = torch.as_tensor(metadata["hemi"].to_numpy() - 1, dtype=torch.long)
+        counts = torch.bincount(labels, minlength=2)
+        pos_weight = (counts[0] / counts[1]).to(device)
 
         def _default_callbacks():
             # Create fresh callback objects per estimator to avoid shared state across clones/fits.
@@ -85,29 +81,29 @@ def train_select_classifiers(
                     ),
                 )
             ]
-
-        skorch_common = {
-            "criterion": nn.CrossEntropyLoss,
-            "criterion__weight": class_weights,
-            "max_epochs": 100,
-            "lr": 1e-3,
-            "batch_size": 64,
-            "optimizer": torch.optim.AdamW,
-            "iterator_train__shuffle": True,
-            # Keep a small validation split inside each CV fold so we can use early stopping.
-            "train_split": ValidSplit(0.2, stratified=True, random_state=42),
-            "device": device,
-            "verbose": 0,
-        }
+        
+        def make_bce_net(module):
+            net = NeuralNetBinaryClassifier(
+                module=module,
+                callbacks=_default_callbacks(),
+                criterion=nn.BCEWithLogitsLoss,
+                criterion__pos_weight=pos_weight,
+                max_epochs=100,
+                lr=1e-3,
+                batch_size=64,
+                optimizer=torch.optim.AdamW,
+                iterator_train__shuffle=True,
+                train_split=ValidSplit(0.2, stratified=True, random_state=42),
+                device=device,
+                verbose=0,
+            )
+            net.threshold = 0.5
+            return net
 
         gridsearch_specs_list = [
             {
                 "name": "LSTM",
-                "estimator": NeuralNetClassifier(
-                    module=LSTMSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(LSTMSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -119,11 +115,7 @@ def train_select_classifiers(
             },
             {
                 "name": "GRU",
-                "estimator": NeuralNetClassifier(
-                    module=GRUSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(GRUSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -135,11 +127,7 @@ def train_select_classifiers(
             },
             {
                 "name": "RNN",
-                "estimator": NeuralNetClassifier(
-                    module=RNNSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(RNNSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -152,11 +140,7 @@ def train_select_classifiers(
             },
             {
                 "name": "CNN1D",
-                "estimator": NeuralNetClassifier(
-                    module=Conv1DSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(Conv1DSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0, 1e-4],
                     "lr": [3e-4, 1e-3],
@@ -167,11 +151,7 @@ def train_select_classifiers(
             },
             {
                 "name": "Transformer",
-                "estimator": NeuralNetClassifier(
-                    module=TransformerSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(TransformerSequenceClassifier),
                 # Use a list of grids to avoid invalid (d_model, nhead) combinations.
                 "param_grid": [
                     {
@@ -200,11 +180,7 @@ def train_select_classifiers(
             },
             {
                 "name": "Reservoir",
-                "estimator": NeuralNetClassifier(
-                    module=ReservoirSequenceClassifier,
-                    callbacks=_default_callbacks(),
-                    **skorch_common,
-                ),
+                "estimator": make_bce_net(ReservoirSequenceClassifier),
                 "param_grid": {
                     "optimizer__weight_decay": [0.0],
                     "lr": [1e-3],
@@ -324,9 +300,11 @@ def train_select_classifiers(
 
     tuner = tune.Tuner(
         tune.with_resources(trainable, resources),
-        # One Ray trial per Cartesian point (some will early-exit if already trained).
         param_space=param_space,
-        run_config=RunConfig(name="train_select_classifiers", verbose=1),
+        tune_config=TuneConfig(
+            trial_dirname_creator=lambda t: f"trial_{t.trial_id}"
+        ),
+        run_config=RunConfig(name="tsc"),
     )
     result_grid = tuner.fit()
     ray.shutdown()
