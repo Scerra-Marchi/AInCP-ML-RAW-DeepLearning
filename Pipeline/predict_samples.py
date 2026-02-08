@@ -40,30 +40,38 @@ def predict_samples(data_folder, estimators, subject_indexes):
     # ===============================
     # PREDIZIONE
     # ===============================
-    y_list = []
-    hp_tot_list = []
+    y_list = []        # logits per finestra (0 sulle finestre invalide)
+    hp_tot_list = []   # media dei logits per paziente
+
+    invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
 
     for es in estimators:
 
         X = es['series']
-        y = np.asarray(es['estimator'].predict(X))
-        y = y.astype(np.int16)
-        
-        cluster_healthy_samples = int(np.sum(y == 0))     # Non emiplegici
-        cluster_hemiplegic_samples = int(np.sum(y == 1))  # Emiplegici
-        # Apply bitmap: overwrite invalid windows with 0
-        y[np.asarray(invalid_bitmap, dtype=bool)] = -1
-        y_mapped = np.zeros_like(y, dtype=int)
-        y_mapped[y == 0] = 1
-        y_mapped[y == 1] = -1
-        y[np.asarray(invalid_bitmap, dtype=bool)] = 0
-        y_list.append(y_mapped)
 
-        if (cluster_healthy_samples + cluster_hemiplegic_samples) > 0:
-            hp_tot = (
-                cluster_healthy_samples /
-                (cluster_healthy_samples + cluster_hemiplegic_samples)
-            ) * 100
+        # ===============================
+        # LOGITS (no discretizzazione)
+        # ===============================
+        logits = np.concatenate([
+            y.detach().cpu().numpy()
+            for y in es['estimator'].forward_iter(X)
+        ])
+
+        # finestre valide
+        valid_logits = logits[~invalid_mask]
+
+        # ===============================
+        # LOGITS PER FINESTRA (con bitmap)
+        # ===============================
+        logits_with_bitmap = logits.copy()
+        logits_with_bitmap[invalid_mask] = 0.0
+        y_list.append(logits_with_bitmap)
+
+        # ===============================
+        # MEDIA LOGITS PER TIME SERIES
+        # ===============================
+        if valid_logits.size > 0:
+            hp_tot = float(np.mean(valid_logits))
         else:
             hp_tot = np.nan
 
