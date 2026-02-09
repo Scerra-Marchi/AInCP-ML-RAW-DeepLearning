@@ -42,6 +42,7 @@ class LSTMSequenceClassifier(nn.Module):
         if self.lstm is None:
             self._build_lstm(x.shape[-1], x.device)
 
+        self.lstm.flatten_parameters()
         out, _ = self.lstm(x)
         return self.classifier(out[:, -1]).squeeze(-1)
 
@@ -84,6 +85,7 @@ class GRUSequenceClassifier(nn.Module):
         if self.gru is None:
             self._build_gru(x.shape[-1], x.device)
 
+        self.gru.flatten_parameters()
         out, _ = self.gru(x)
         return self.classifier(out[:, -1]).squeeze(-1)
 
@@ -130,6 +132,7 @@ class RNNSequenceClassifier(nn.Module):
         if self.rnn is None:
             self._build_rnn(x.shape[-1], x.device)
 
+        self.rnn.flatten_parameters()
         out, _ = self.rnn(x)
         return self.classifier(out[:, -1]).squeeze(-1)
 
