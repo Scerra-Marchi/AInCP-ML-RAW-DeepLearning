@@ -217,10 +217,12 @@ def train_select_classifiers(
     # Train the full Cartesian grid via Ray Tune. Each trial will early-exit if artifacts already exist.
     # Ray prints warnings/errors related to accelerator env var overrides and metrics exporting.
     os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
+    # Reduce expensive global experiment-state writes on long runs.
+    os.environ.setdefault("TUNE_GLOBAL_CHECKPOINT_S", "600")
 
     import ray
     from ray import tune
-    from ray.tune import RunConfig
+    from ray.tune import CLIReporter, RunConfig
 
     model_names = [spec["name"] for spec in gridsearch_specs_list]
     if len(set(model_names)) != len(model_names):
@@ -304,7 +306,10 @@ def train_select_classifiers(
         tune_config=TuneConfig(
             trial_dirname_creator=lambda t: f"trial_{t.trial_id}"
         ),
-        run_config=RunConfig(name="tsc"),
+        run_config=RunConfig(
+            name="tsc",
+            progress_reporter=CLIReporter(max_report_frequency=600),
+        ),
     )
     result_grid = tuner.fit()
     ray.shutdown()
