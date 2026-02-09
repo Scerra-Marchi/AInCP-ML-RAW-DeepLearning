@@ -238,6 +238,9 @@ def train_select_classifiers(
         model_name_to_idx,
     ):
         # Ray Tune trainable: receives one point in the Cartesian product.
+        # Ensure local imports and relative paths resolve consistently inside the worker process.
+        os.chdir(pipeline_dir)
+
         method = config["method"]
         window_size = int(config["window_size"])
         decimation_factor = int(config["decimation_factor"])
@@ -250,9 +253,6 @@ def train_select_classifiers(
         # Skip work if the run was already trained.
         if _artifacts_exist(gridsearch_folder):
             return
-
-        # Ensure local imports resolve consistently inside the Ray worker process.
-        os.chdir(pipeline_dir)
 
         # Fixed seed for reproducibility across workers.
         seed = 42
