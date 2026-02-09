@@ -214,7 +214,13 @@ class TransformerSequenceClassifier(nn.Module):
             batch_first=True,
             norm_first=True,
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        # Pre-norm encoder (`norm_first=True`) is incompatible with nested tensor
+        # acceleration; disable it explicitly to avoid repeated runtime warnings.
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers,
+            enable_nested_tensor=False,
+        )
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(d_model, 1)
 
@@ -308,4 +314,3 @@ class ReservoirSequenceClassifier(nn.Module):
             state = (1 - self.leak_rate) * state + self.leak_rate * torch.tanh(pre)
 
         return self.classifier(state).squeeze(-1)
-
