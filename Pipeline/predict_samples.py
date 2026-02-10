@@ -1,6 +1,7 @@
 import numpy as np
 from create_windows import create_windows
 
+
 def predict_samples(data_folder, estimators, subject_indexes):
 
     if not estimators:
@@ -40,8 +41,8 @@ def predict_samples(data_folder, estimators, subject_indexes):
     # ===============================
     # PREDIZIONE
     # ===============================
-    y_list = []        # logits per finestra (0 sulle finestre invalide)
-    hp_tot_list = []   # media dei logits per paziente
+    y_list = []        # probabilità per finestra (0 sulle finestre invalide)
+    hp_tot_list = []   # media delle probabilità per paziente
 
     invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
 
@@ -50,28 +51,27 @@ def predict_samples(data_folder, estimators, subject_indexes):
         X = es['series']
 
         # ===============================
-        # LOGITS (no discretizzazione)
+        # PROBABILITÀ POST-SIGMOIDE
         # ===============================
-        logits = np.concatenate([
-            y.detach().cpu().numpy()
-            for y in es['estimator'].forward_iter(X)
-        ])
+        # predict_proba -> (N, 2)
+        # [:, 1] = P(classe positiva = sano)
+        probs = es['estimator'].predict_proba(X)[:, 1]
 
         # finestre valide
-        valid_logits = logits[~invalid_mask]
+        valid_probs = probs[~invalid_mask]
 
         # ===============================
-        # LOGITS PER FINESTRA (con bitmap)
+        # PROBABILITÀ PER FINESTRA (con bitmap)
         # ===============================
-        logits_with_bitmap = logits.copy()
-        logits_with_bitmap[invalid_mask] = 0.0
-        y_list.append(logits_with_bitmap)
+        probs_with_bitmap = probs.copy()
+        probs_with_bitmap[invalid_mask] = 0.0
+        y_list.append(probs_with_bitmap)
 
         # ===============================
-        # MEDIA LOGITS PER TIME SERIES
+        # MEDIA PROBABILITÀ PER TIME SERIES
         # ===============================
-        if valid_logits.size > 0:
-            hp_tot = float(np.mean(valid_logits))
+        if valid_probs.size > 0:
+            hp_tot = float(np.mean(valid_probs))
         else:
             hp_tot = np.nan
 
