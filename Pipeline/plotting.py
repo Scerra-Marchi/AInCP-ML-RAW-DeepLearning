@@ -4,7 +4,7 @@ import pandas as pd
 from itertools import product
 import joblib as jl
 import numpy as np
-from predict_samples import predict_samples
+from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
 import math
@@ -45,27 +45,15 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     #estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] == 1) & (best_estimators_df['method'] == 'difference')].iterrows()]
 
     #estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= 0.954) & (best_estimators_df['window_size'] == 300)].iterrows()]
-    estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= min_mean_test_score) & (best_estimators_df['window_size'] == window_size) & (best_estimators_df['decimation_factor'] == decimation_factor)].iterrows()]
+    estimators_specs_list, estimators_list = build_estimators_list(
+        best_estimators_df=best_estimators_df,
+        save_folder=save_folder,
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
     
     print('Expected estimators: ',len(estimators_specs_list))
-    estimators_list = []
-    model_id_concat = ''
-    
-    for estimators_specs in estimators_specs_list:
-        estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
-        
-        print("Loading -> ", estimator_dir + "best_estimator.joblib")
-        estimator = jl.load(estimator_dir + "best_estimator.joblib")
-        estimators_list.append(
-            {
-                "estimator": estimator,
-                "method": estimators_specs["method"],
-                "window_size": estimators_specs["window_size"],
-                "decimation_factor": estimators_specs["decimation_factor"],
-            }
-        )
-        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
-        model_id_concat = model_id_concat + str(estimator.get_params())
 
     metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
     metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # 'age_aha', 'gender', 

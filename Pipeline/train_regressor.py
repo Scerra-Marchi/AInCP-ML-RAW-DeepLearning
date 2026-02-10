@@ -4,7 +4,7 @@ import numpy as np
 import joblib as jl
 import pandas as pd
 from sklearn.linear_model import LinearRegression
-from predict_samples import predict_samples
+from predict_samples import build_estimators_list, predict_samples
 import os
 import sys
 
@@ -34,25 +34,13 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
 
     # Caricamento dei classificatori
 
-    estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= min_mean_test_score) & (best_estimators_df['window_size'] == window_size) & (best_estimators_df['decimation_factor'] == decimation_factor)].iterrows()]
-
-    estimators_list = []
-    model_params_concat = ''
-    
-    for estimators_specs in estimators_specs_list:
-        estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
-
-        estimator = jl.load(estimator_dir + "best_estimator.joblib")
-        estimators_list.append(
-            {
-                "estimator": estimator,
-                "method": estimators_specs["method"],
-                "window_size": estimators_specs["window_size"],
-                "decimation_factor": estimators_specs["decimation_factor"],
-            }
-        )
-        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
-        model_params_concat = model_params_concat + str(estimator.get_params())
+    estimators_specs_list, estimators_list = build_estimators_list(
+        best_estimators_df=best_estimators_df,
+        save_folder=save_folder,
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
 
     reg_path = 'regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     os.makedirs(save_folder + 'Regressors/', exist_ok = True)
