@@ -94,7 +94,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         healthy_percentage.append(hp_tot_list)
         real_aha = metadata['AHA'].iloc[subject_index]
         predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
-        predicted_aha = 100 if predicted_aha > 100 else predicted_aha
+        predicted_aha = float(np.clip(predicted_aha, 0, 100))
         predicted_aha_list.append(predicted_aha)
 
         print('Patient ', subject)
@@ -157,6 +157,8 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
 
         #################### GRAFICO DEI PUNTI ####################
+        ax = plt.gca()
+        ax.set_ylim([0,1])
         for pred in predictions:
             #axs[2].scatter(list(range(len(pred))), pred, c=pred, cmap='brg', s=1) 
             plt.scatter(
@@ -273,7 +275,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
                 aha_list_smooth.append(np.nan)
             else:
                 predicted_window_aha = regressor.predict(np.array([elements]))[0]
-                aha_list_smooth.append(predicted_window_aha if predicted_window_aha <= 100 else 100)
+                aha_list_smooth.append(float(np.clip(predicted_window_aha, 0, 100)))
 
         #plt.title('Andamento Home-AHA')
         conf = 5
