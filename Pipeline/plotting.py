@@ -83,7 +83,8 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
     for subject_index in subjects_indexes:
         subject = metadata['subject'].iloc[subject_index]
-        predictions, hp_tot_list= predict_samples(data_folder, estimators_list, [subject_index])
+        predictions, hp_tot_list, invalid_bitmap = predict_samples(data_folder, estimators_list, [subject_index])
+        invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         magnitude_D, magnitude_ND = read_file  (data_folder,
                                                 subject,
                                                 window_size,
@@ -183,14 +184,18 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
         for pred in predictions:
             h_perc_list = []
-            subList = [pred[n:n+trend_block_size] for n in range(0, len(pred), trend_block_size)]
-            for l in subList:
-                valid_ratio = (len(l) / trend_block_size) * 100
-                if valid_ratio < significativity_threshold:
+            for start in range(0, len(pred), trend_block_size):
+                pred_block = pred[start:start + trend_block_size]
+                invalid_block = invalid_mask[start:start + trend_block_size]
+
+                valid_count_block = int((~invalid_block).sum())
+                valid_ratio = (valid_count_block / invalid_block.size) * 100
+
+                if valid_ratio < significativity_threshold or valid_count_block == 0:
                     h_perc_list.append(np.nan)
                 else:
-                    # Media probabilità → percentuale
-                    h_perc_list.append(np.mean(l))
+                    # Media delle probabilità sulle sole finestre valide.
+                    h_perc_list.append(float(np.mean(pred_block[~invalid_block])))
 
 
             #h_perc_list.append(h_perc_list[-1]) PER LA LINEA ORIZZONTALE FINALE
@@ -221,15 +226,17 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         for pred in predictions:
             h_perc_list_smooth = []
             h_perc_list_smooth_significativity = []
-            subList_smooth = [pred[n:n+trend_block_size] for n in range(0, len(pred)-trend_block_size+1)]
-            for l in subList_smooth:
-                valid_ratio = (len(l) / trend_block_size) * 100
+            for start in range(0, len(pred) - trend_block_size + 1):
+                pred_window = pred[start:start + trend_block_size]
+                invalid_window = invalid_mask[start:start + trend_block_size]
+                valid_count_window = int((~invalid_window).sum())
+                valid_ratio = (valid_count_window / invalid_window.size) * 100
                 h_perc_list_smooth_significativity.append(valid_ratio)
 
-                if valid_ratio < significativity_threshold:
+                if valid_ratio < significativity_threshold or valid_count_window == 0:
                     h_perc_list_smooth.append(np.nan)
                 else:
-                    h_perc_list_smooth.append(np.mean(l))
+                    h_perc_list_smooth.append(float(np.mean(pred_window[~invalid_window])))
 
 
             #axs[5].plot(h_perc_list_smooth)

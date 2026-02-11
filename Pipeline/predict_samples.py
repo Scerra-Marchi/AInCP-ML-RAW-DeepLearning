@@ -53,6 +53,7 @@ def predict_samples(data_folder, estimators, subject_indexes):
     Returns:
     - y_list: one concatenated probability vector per estimator
     - hp_tot_list: one mean(valid probability) per estimator
+    - invalid_bitmap: concatenated invalid-window bitmap for the requested subjects
     """
 
     if not estimators:
@@ -74,6 +75,7 @@ def predict_samples(data_folder, estimators, subject_indexes):
     y_chunks_per_estimator = [[] for _ in estimators]
     valid_sum = np.zeros(len(estimators), dtype=float)
     valid_count = np.zeros(len(estimators), dtype=int)
+    invalid_chunks = []
 
     for subject_index in subject_indexes:
         subject = metadata_subjects["subject"].iloc[int(subject_index)]
@@ -95,6 +97,7 @@ def predict_samples(data_folder, estimators, subject_indexes):
 
         method_to_features = {}
         method_invalid_mask = {}
+        subject_invalid_mask = None
 
         for method in missing_methods:
             X, _, _, _, invalid_bitmap = create_windows(
@@ -118,7 +121,7 @@ def predict_samples(data_folder, estimators, subject_indexes):
                     usecols=["proba", "is_invalid"],
                     engine="pyarrow",
                 )
-                probs_with_bitmap = cached_df["proba"].to_numpy(dtype=float)
+                probs = cached_df["proba"].to_numpy(dtype=float)
                 invalid_mask = cached_df["is_invalid"].to_numpy(dtype=np.uint8).astype(bool)
             else:
                 # Slow path: compute probabilities and persist them for next runs.
@@ -126,23 +129,25 @@ def predict_samples(data_folder, estimators, subject_indexes):
                 invalid_mask = method_invalid_mask[es["method"]]
 
                 probs = es["estimator"].predict_proba(X)[:, 1]
-                probs_with_bitmap = probs.copy()
-                probs_with_bitmap[invalid_mask] = 0.0
 
                 if cache_path is not None:
                     pd.DataFrame(
                         {
-                            "window_idx": np.arange(probs_with_bitmap.size, dtype=np.int32),
-                            "proba": probs_with_bitmap,
+                            "window_idx": np.arange(probs.size, dtype=np.int32),
+                            "proba": probs,
                             "is_invalid": invalid_mask.astype(np.uint8),
                         }
                     ).to_csv(cache_path, index=False)
 
-            # hp_tot is computed only on valid windows (invalid windows are forced to zero in y_list).
-            valid_probs = probs_with_bitmap[~invalid_mask]
+            # Keep raw probabilities untouched; validity is handled via invalid_mask.
+            valid_probs = probs[~invalid_mask]
             valid_sum[i] += float(valid_probs.sum())
             valid_count[i] += int(valid_probs.size)
-            y_chunks_per_estimator[i].append(probs_with_bitmap)
+            y_chunks_per_estimator[i].append(probs)
+            if subject_invalid_mask is None:
+                subject_invalid_mask = invalid_mask
+
+        invalid_chunks.append(subject_invalid_mask.astype(np.uint8))
 
     y_list = []
     hp_tot_list = []
@@ -159,4 +164,6 @@ def predict_samples(data_folder, estimators, subject_indexes):
         else:
             hp_tot_list.append(np.nan)
 
-    return y_list, hp_tot_list
+    invalid_bitmap = np.concatenate(invalid_chunks) if invalid_chunks else np.array([], dtype=np.uint8)
+
+    return y_list, hp_tot_list, invalid_bitmap

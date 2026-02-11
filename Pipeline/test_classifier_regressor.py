@@ -25,7 +25,7 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
     hp_tot_list_list = []
     
     for index in test_indexes:
-        _, hp_tot = predict_samples(data_folder, estimators_list, [index])
+        _, hp_tot, _ = predict_samples(data_folder, estimators_list, [index])
         hp_tot_list_list.append(hp_tot)
 
         #   hp_tot_list_list =                 y =
@@ -36,7 +36,7 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
 
     # Alternative
     #for i in range (metadata.shape[0]):
-    #    _, hp_tot, _, _ = predict_samples(data_folder, estimators_list, metadata['subject'].iloc[i])
+    #    _, hp_tot, _ = predict_samples(data_folder, estimators_list, metadata['subject'].iloc[i])
     #    x.append(hp_tot[0])
     #    y.append(metadata['AHA'].iloc[i])
 

@@ -55,7 +55,7 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
 
     for index in train_indexes:
         print('REGRESSOR: PATIENT ', metadata['subject'].iloc[index], 'BEGIN')
-        _,hp_tot_list = predict_samples(data_folder, estimators_list, [index])
+        _, hp_tot_list, _ = predict_samples(data_folder, estimators_list, [index])
         hp_tot_list_list.append(hp_tot_list)
         print('REGRESSOR: PATIENT ', metadata['subject'].iloc[index], 'END')
         sys.stdout.flush()
