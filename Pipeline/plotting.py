@@ -55,8 +55,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     
     print('Expected estimators: ',len(estimators_specs_list))
 
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
-    metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # 'age_aha', 'gender', 
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx', usecols=['subject', 'MACS', 'age_aha', 'hemi', 'gender', 'side_hemi', 'AHA', 'AI_aha', 'AI_week',])
 
     reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     regressor = jl.load(reg_path)
@@ -82,9 +81,9 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     healthy_percentage = []
     predicted_aha_list = []
 
-    for index in range(len(metadata)):
-        subject = metadata['subject'].iloc[index]
-        predictions, hp_tot_list= predict_samples(data_folder, estimators_list, [index])
+    for subject_index in subjects_indexes:
+        subject = metadata['subject'].iloc[subject_index]
+        predictions, hp_tot_list= predict_samples(data_folder, estimators_list, [subject_index])
         magnitude_D, magnitude_ND = read_file  (data_folder,
                                                 subject,
                                                 window_size,
@@ -93,7 +92,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
                                                 return_mag=1
                                                )
         healthy_percentage.append(hp_tot_list)
-        real_aha = metadata['AHA'].iloc[index]
+        real_aha = metadata['AHA'].iloc[subject_index]
         predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
         predicted_aha = 100 if predicted_aha > 100 else predicted_aha
         predicted_aha_list.append(predicted_aha)
@@ -215,7 +214,8 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         #plt.title('Andamento CPI su finestra scorrevole')
         plt.grid()
         ax = plt.gca()
-        ax.set_ylim([-1,101])
+        ax.set_ylim([0,1])
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
         for pred in predictions:
             h_perc_list_smooth = []
             h_perc_list_smooth_significativity = []
@@ -236,9 +236,6 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
             plot_h_perc_list_smooth = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth
 
-            ax = plt.gca()
-            ax.set_ylim([0,1])
-            ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
             plt.plot(timestamps[::window_size], plot_h_perc_list_smooth)
 
 
@@ -310,10 +307,11 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             plt.show() 
         plt.close()
 
-    metadata['healthy_percentage'] = healthy_percentage
-    metadata['predicted_aha'] = predicted_aha_list
+    metadata_out = metadata.iloc[subjects_indexes].copy()
+    metadata_out['healthy_percentage'] = healthy_percentage
+    metadata_out['predicted_aha'] = predicted_aha_list
 
-    metadata.to_csv(stats_folder + '/predictions_dataframe.csv')
+    metadata_out.to_csv(stats_folder + '/predictions_dataframe.csv', index=False)
 
     #metadata.plot.scatter(x='healthy_percentage', y='AHA', c='MACS', colormap='viridis').get_figure().savefig(stats_folder + 'plot_healthyPerc_AHA.png')
     #metadata.plot.scatter(x='healthy_percentage', y='AI_week', c='MACS', colormap='viridis').get_figure().savefig(stats_folder + 'plot_healthyPerc_AI_week.png')
