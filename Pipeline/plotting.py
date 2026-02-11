@@ -160,7 +160,15 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         #################### GRAFICO DEI PUNTI ####################
         for pred in predictions:
             #axs[2].scatter(list(range(len(pred))), pred, c=pred, cmap='brg', s=1) 
-            plt.scatter(list(range(len(pred))), pred, c=pred, cmap='brg', norm=plt.Normalize(-1, +1), s=1)
+            plt.scatter(
+                        list(range(len(pred))),
+                        pred,
+                        c=pred,
+                        cmap='viridis',
+                        norm=plt.Normalize(0, 1),
+                        s=1
+                    )
+
 
         #plt.title('Grafico delle predizioni')
         plt.xlabel("Sample")
@@ -176,12 +184,13 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             h_perc_list = []
             subList = [pred[n:n+trend_block_size] for n in range(0, len(pred), trend_block_size)]
             for l in subList:
-                n_hemi = l.tolist().count(-1)
-                n_healthy = l.tolist().count(1)
-                if (((n_hemi + n_healthy) / trend_block_size) * 100) < significativity_threshold:
+                valid_ratio = (len(l) / trend_block_size) * 100
+                if valid_ratio < significativity_threshold:
                     h_perc_list.append(np.nan)
                 else:
-                    h_perc_list.append((n_healthy / (n_hemi + n_healthy)) * 100)
+                    # Media probabilità → percentuale
+                    h_perc_list.append(np.mean(l))
+
 
             #h_perc_list.append(h_perc_list[-1]) PER LA LINEA ORIZZONTALE FINALE
             #axs[4].grid()
@@ -189,7 +198,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             #axs[4].plot(h_perc_list, drawstyle = 'steps-post')
             plt.grid()
             ax = plt.gca()
-            ax.set_ylim([-1,101])
+            ax.set_ylim([0,1])
             ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
             plt.plot(timestamps[::block_samples], h_perc_list, drawstyle = 'steps-post')
             
@@ -212,13 +221,14 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             h_perc_list_smooth_significativity = []
             subList_smooth = [pred[n:n+trend_block_size] for n in range(0, len(pred)-trend_block_size+1)]
             for l in subList_smooth:
-                n_hemi = l.tolist().count(-1)
-                n_healthy = l.tolist().count(1)
-                h_perc_list_smooth_significativity.append(((n_hemi + n_healthy) / trend_block_size) * 100)
-                if (((n_hemi + n_healthy) / trend_block_size) * 100) < significativity_threshold:
+                valid_ratio = (len(l) / trend_block_size) * 100
+                h_perc_list_smooth_significativity.append(valid_ratio)
+
+                if valid_ratio < significativity_threshold:
                     h_perc_list_smooth.append(np.nan)
                 else:
-                    h_perc_list_smooth.append((n_healthy / (n_hemi + n_healthy)) * 100)
+                    h_perc_list_smooth.append(np.mean(l))
+
 
             #axs[5].plot(h_perc_list_smooth)
 
@@ -227,7 +237,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             plot_h_perc_list_smooth = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth
 
             ax = plt.gca()
-            ax.set_ylim([-1,101])
+            ax.set_ylim([0,1])
             ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
             plt.plot(timestamps[::window_size], plot_h_perc_list_smooth)
 
