@@ -4,7 +4,7 @@ import pandas as pd
 from itertools import product
 import joblib as jl
 import numpy as np
-from predict_samples import predict_samples
+from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
 import math
@@ -45,30 +45,17 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     #estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] == 1) & (best_estimators_df['method'] == 'difference')].iterrows()]
 
     #estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= 0.954) & (best_estimators_df['window_size'] == 300)].iterrows()]
-    estimators_specs_list = [row for index, row in best_estimators_df[(best_estimators_df['mean_test_score'] >= min_mean_test_score) & (best_estimators_df['window_size'] == window_size) & (best_estimators_df['decimation_factor'] == decimation_factor)].iterrows()]
+    estimators_specs_list, estimators_list = build_estimators_list(
+        best_estimators_df=best_estimators_df,
+        save_folder=save_folder,
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
     
     print('Expected estimators: ',len(estimators_specs_list))
-    estimators_list = []
-    model_id_concat = ''
-    
-    for estimators_specs in estimators_specs_list:
-        estimator_dir = save_folder + "Trained_models/" + estimators_specs['method'] + "/" + str(estimators_specs['window_size']) + "_points/" + str(estimators_specs['decimation_factor']) + "_decimation_factor/" + estimators_specs['model_type'].split(".")[-1] + "/gridsearch_" + estimators_specs['gridsearch_hash']  + "/"
-        
-        print("Loading -> ", estimator_dir + "best_estimator.joblib")
-        estimator = jl.load(estimator_dir + "best_estimator.joblib")
-        estimators_list.append(
-            {
-                "estimator": estimator,
-                "method": estimators_specs["method"],
-                "window_size": estimators_specs["window_size"],
-                "decimation_factor": estimators_specs["decimation_factor"],
-            }
-        )
-        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
-        model_id_concat = model_id_concat + str(estimator.get_params())
 
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx').iloc[subjects_indexes]
-    metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # 'age_aha', 'gender', 
+    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx', usecols=['subject', 'MACS', 'age_aha', 'hemi', 'gender', 'side_hemi', 'AHA', 'AI_aha', 'AI_week',])
 
     reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     regressor = jl.load(reg_path)
@@ -94,9 +81,10 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     healthy_percentage = []
     predicted_aha_list = []
 
-    for index in range(len(metadata)):
-        subject = metadata['subject'].iloc[index]
-        predictions, hp_tot_list= predict_samples(data_folder, estimators_list, [index])
+    for subject_index in subjects_indexes:
+        subject = metadata['subject'].iloc[subject_index]
+        predictions, hp_tot_list, invalid_bitmap = predict_samples(data_folder, estimators_list, [subject_index])
+        invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         magnitude_D, magnitude_ND = read_file  (data_folder,
                                                 subject,
                                                 window_size,
@@ -105,9 +93,9 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
                                                 return_mag=1
                                                )
         healthy_percentage.append(hp_tot_list)
-        real_aha = metadata['AHA'].iloc[index]
+        real_aha = metadata['AHA'].iloc[subject_index]
         predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
-        predicted_aha = 100 if predicted_aha > 100 else predicted_aha
+        predicted_aha = float(np.clip(predicted_aha, 0, 100))
         predicted_aha_list.append(predicted_aha)
 
         print('Patient ', subject)
@@ -170,9 +158,19 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
 
         #################### GRAFICO DEI PUNTI ####################
+        ax = plt.gca()
+        ax.set_ylim([0,1])
         for pred in predictions:
             #axs[2].scatter(list(range(len(pred))), pred, c=pred, cmap='brg', s=1) 
-            plt.scatter(list(range(len(pred))), pred, c=pred, cmap='brg', norm=plt.Normalize(-1, +1), s=1)
+            plt.scatter(
+                        list(range(len(pred))),
+                        pred,
+                        c=pred,
+                        cmap='viridis',
+                        norm=plt.Normalize(0, 1),
+                        s=1
+                    )
+
 
         #plt.title('Grafico delle predizioni')
         plt.xlabel("Sample")
@@ -186,14 +184,19 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
         for pred in predictions:
             h_perc_list = []
-            subList = [pred[n:n+trend_block_size] for n in range(0, len(pred), trend_block_size)]
-            for l in subList:
-                n_hemi = l.tolist().count(-1)
-                n_healthy = l.tolist().count(1)
-                if (((n_hemi + n_healthy) / trend_block_size) * 100) < significativity_threshold:
+            for start in range(0, len(pred), trend_block_size):
+                pred_block = pred[start:start + trend_block_size]
+                invalid_block = invalid_mask[start:start + trend_block_size]
+
+                valid_count_block = int((~invalid_block).sum())
+                valid_ratio = (valid_count_block / invalid_block.size) * 100
+
+                if valid_ratio < significativity_threshold or valid_count_block == 0:
                     h_perc_list.append(np.nan)
                 else:
-                    h_perc_list.append((n_healthy / (n_hemi + n_healthy)) * 100)
+                    # Media delle probabilità sulle sole finestre valide.
+                    h_perc_list.append(float(np.mean(pred_block[~invalid_block])))
+
 
             #h_perc_list.append(h_perc_list[-1]) PER LA LINEA ORIZZONTALE FINALE
             #axs[4].grid()
@@ -201,7 +204,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             #axs[4].plot(h_perc_list, drawstyle = 'steps-post')
             plt.grid()
             ax = plt.gca()
-            ax.set_ylim([-1,101])
+            ax.set_ylim([0,1])
             ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
             plt.plot(timestamps[::block_samples], h_perc_list, drawstyle = 'steps-post')
             
@@ -218,19 +221,23 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         #plt.title('Andamento CPI su finestra scorrevole')
         plt.grid()
         ax = plt.gca()
-        ax.set_ylim([-1,101])
+        ax.set_ylim([0,1])
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
         for pred in predictions:
             h_perc_list_smooth = []
             h_perc_list_smooth_significativity = []
-            subList_smooth = [pred[n:n+trend_block_size] for n in range(0, len(pred)-trend_block_size+1)]
-            for l in subList_smooth:
-                n_hemi = l.tolist().count(-1)
-                n_healthy = l.tolist().count(1)
-                h_perc_list_smooth_significativity.append(((n_hemi + n_healthy) / trend_block_size) * 100)
-                if (((n_hemi + n_healthy) / trend_block_size) * 100) < significativity_threshold:
+            for start in range(0, len(pred) - trend_block_size + 1):
+                pred_window = pred[start:start + trend_block_size]
+                invalid_window = invalid_mask[start:start + trend_block_size]
+                valid_count_window = int((~invalid_window).sum())
+                valid_ratio = (valid_count_window / invalid_window.size) * 100
+                h_perc_list_smooth_significativity.append(valid_ratio)
+
+                if valid_ratio < significativity_threshold or valid_count_window == 0:
                     h_perc_list_smooth.append(np.nan)
                 else:
-                    h_perc_list_smooth.append((n_healthy / (n_hemi + n_healthy)) * 100)
+                    h_perc_list_smooth.append(float(np.mean(pred_window[~invalid_window])))
+
 
             #axs[5].plot(h_perc_list_smooth)
 
@@ -238,9 +245,6 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
             plot_h_perc_list_smooth = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth
 
-            ax = plt.gca()
-            ax.set_ylim([-1,101])
-            ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
             plt.plot(timestamps[::window_size], plot_h_perc_list_smooth)
 
 
@@ -278,7 +282,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
                 aha_list_smooth.append(np.nan)
             else:
                 predicted_window_aha = regressor.predict(np.array([elements]))[0]
-                aha_list_smooth.append(predicted_window_aha if predicted_window_aha <= 100 else 100)
+                aha_list_smooth.append(float(np.clip(predicted_window_aha, 0, 100)))
 
         #plt.title('Andamento Home-AHA')
         conf = 5
@@ -312,10 +316,11 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             plt.show() 
         plt.close()
 
-    metadata['healthy_percentage'] = healthy_percentage
-    metadata['predicted_aha'] = predicted_aha_list
+    metadata_out = metadata.iloc[subjects_indexes].copy()
+    metadata_out['healthy_percentage'] = healthy_percentage
+    metadata_out['predicted_aha'] = predicted_aha_list
 
-    metadata.to_csv(stats_folder + '/predictions_dataframe.csv')
+    metadata_out.to_csv(stats_folder + '/predictions_dataframe.csv', index=False)
 
     #metadata.plot.scatter(x='healthy_percentage', y='AHA', c='MACS', colormap='viridis').get_figure().savefig(stats_folder + 'plot_healthyPerc_AHA.png')
     #metadata.plot.scatter(x='healthy_percentage', y='AI_week', c='MACS', colormap='viridis').get_figure().savefig(stats_folder + 'plot_healthyPerc_AI_week.png')

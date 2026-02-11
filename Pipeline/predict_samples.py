@@ -1,7 +1,60 @@
 import numpy as np
+import joblib as jl
+import os
+import pandas as pd
 from create_windows import create_windows
 
+
+def build_estimators_list(best_estimators_df, save_folder, min_mean_test_score, window_size, decimation_factor):
+    """
+    Build the estimator dictionaries consumed by predict_samples().
+    Each estimator carries its own cache directory under the model folder.
+    """
+    estimators_specs_list = [
+        row
+        for _, row in best_estimators_df[
+            (best_estimators_df["mean_test_score"] >= min_mean_test_score)
+            & (best_estimators_df["window_size"] == window_size)
+            & (best_estimators_df["decimation_factor"] == decimation_factor)
+        ].iterrows()
+    ]
+
+    estimators_list = []
+
+    for estimators_specs in estimators_specs_list:
+        estimator_dir = (
+            save_folder + "Trained_models/" + estimators_specs["method"] + "/" + str(estimators_specs["window_size"]) + "_points/" + str(estimators_specs["decimation_factor"]) + "_decimation_factor/" + estimators_specs["model_type"].split(".")[-1] + "/gridsearch_" + estimators_specs["gridsearch_hash"] + "/"
+        )
+
+        print("Loading -> ", estimator_dir + "best_estimator.joblib")
+        estimator = jl.load(estimator_dir + "best_estimator.joblib")
+        print("Loaded -> ", estimator_dir + "best_estimator.joblib")
+
+        cache_dir = estimator_dir + "pred_cache/"
+        os.makedirs(cache_dir, exist_ok=True)
+
+        estimators_list.append(
+            {
+                "estimator": estimator,
+                "method": estimators_specs["method"],
+                "window_size": estimators_specs["window_size"],
+                "decimation_factor": estimators_specs["decimation_factor"],
+                "estimator_dir": estimator_dir,
+                "cache_dir": cache_dir,
+            }
+        )
+
+    return estimators_specs_list, estimators_list
+
+
 def predict_samples(data_folder, estimators, subject_indexes):
+    """
+    Predict window probabilities for the requested metadata indexes.
+    Returns:
+    - y_list: one concatenated probability vector per estimator
+    - hp_tot_list: one mean(valid probability) per estimator
+    - invalid_bitmap: concatenated invalid-window bitmap for the requested subjects
+    """
 
     if not estimators:
         raise ValueError("You have selected zero estimators to predict the samples with")
@@ -9,64 +62,108 @@ def predict_samples(data_folder, estimators, subject_indexes):
     if len(set(es['window_size'] for es in estimators)) != 1:
         raise ValueError("You have selected estimators that operate on different window sizes")
 
-    window_size = estimators[0]['window_size']
-    decimation_factor = estimators[0]['decimation_factor']
+    if len(set(es['decimation_factor'] for es in estimators)) != 1:
+        raise ValueError("You have selected estimators that operate on different decimation factors")
 
-    # ===============================
-    # FEATURE CACHE PER METHOD
-    # ===============================
-    method_to_features = {}
-    invalid_bitmap = None
+    window_size = estimators[0]["window_size"]
+    decimation_factor = estimators[0]["decimation_factor"]
 
-    unique_methods = set(es['method'] for es in estimators)
+    # subject_indexes are metadata row indexes; we map them to subject IDs for cache filenames.
+    metadata_subjects = pd.read_excel(data_folder + "metadata2023_08.xlsx", usecols=["subject"])
 
-    for method in unique_methods:
+    # We accumulate per subject and concatenate only once at the end.
+    y_chunks_per_estimator = [[] for _ in estimators]
+    valid_sum = np.zeros(len(estimators), dtype=float)
+    valid_count = np.zeros(len(estimators), dtype=int)
+    invalid_chunks = []
 
-        X, _, _, _, invalid_bitmap = create_windows(
-            data_folder=data_folder,
-            subjects_indexes=subject_indexes,
-            operation_type=method,
-            WINDOW_SIZE=window_size,
-            decimation_factor=decimation_factor,
-            input_type='week',
-        )
+    for subject_index in subject_indexes:
+        subject = metadata_subjects["subject"].iloc[int(subject_index)]
 
-        method_to_features[method] = X
+        cache_paths = []
+        missing_methods = set()
 
-    # assegna le serie a ogni estimator
-    for es in estimators:
-        es['series'] = method_to_features[es['method']]
+        for es in estimators:
+            cache_dir = es.get("cache_dir")
+            cache_path = None
+            if cache_dir:
+                # Cache key by (estimator folder, subject id, week input type).
+                cache_path = os.path.join(cache_dir, f"subject_{subject}_week.csv")
+            cache_paths.append(cache_path)
 
-    # ===============================
-    # PREDIZIONE
-    # ===============================
+            # We only build windows for methods that have at least one cache miss.
+            if cache_path is None or not os.path.exists(cache_path):
+                missing_methods.add(es["method"])
+
+        method_to_features = {}
+        method_invalid_mask = {}
+        subject_invalid_mask = None
+
+        for method in missing_methods:
+            X, _, _, _, invalid_bitmap = create_windows(
+                data_folder=data_folder,
+                subjects_indexes=[int(subject_index)],
+                operation_type=method,
+                WINDOW_SIZE=window_size,
+                decimation_factor=decimation_factor,
+                input_type="week",
+            )
+            method_to_features[method] = X
+            method_invalid_mask[method] = np.asarray(invalid_bitmap, dtype=bool)
+
+        for i, es in enumerate(estimators):
+            cache_path = cache_paths[i]
+
+            if cache_path is not None and os.path.exists(cache_path):
+                # Fast path: load only the columns needed downstream.
+                cached_df = pd.read_csv(
+                    cache_path,
+                    usecols=["proba", "is_invalid"],
+                    engine="pyarrow",
+                )
+                probs = cached_df["proba"].to_numpy(dtype=float)
+                invalid_mask = cached_df["is_invalid"].to_numpy(dtype=np.uint8).astype(bool)
+            else:
+                # Slow path: compute probabilities and persist them for next runs.
+                X = method_to_features[es["method"]]
+                invalid_mask = method_invalid_mask[es["method"]]
+
+                probs = es["estimator"].predict_proba(X)[:, 1]
+
+                if cache_path is not None:
+                    pd.DataFrame(
+                        {
+                            "window_idx": np.arange(probs.size, dtype=np.int32),
+                            "proba": probs,
+                            "is_invalid": invalid_mask.astype(np.uint8),
+                        }
+                    ).to_csv(cache_path, index=False)
+
+            # Keep raw probabilities untouched; validity is handled via invalid_mask.
+            valid_probs = probs[~invalid_mask]
+            valid_sum[i] += float(valid_probs.sum())
+            valid_count[i] += int(valid_probs.size)
+            y_chunks_per_estimator[i].append(probs)
+            if subject_invalid_mask is None:
+                subject_invalid_mask = invalid_mask
+
+        invalid_chunks.append(subject_invalid_mask.astype(np.uint8))
+
     y_list = []
     hp_tot_list = []
 
-    for es in estimators:
-
-        X = es['series']
-        y = np.asarray(es['estimator'].predict(X))
-        y = y.astype(np.int16)
-        
-        cluster_healthy_samples = int(np.sum(y == 0))     # Non emiplegici
-        cluster_hemiplegic_samples = int(np.sum(y == 1))  # Emiplegici
-        # Apply bitmap: overwrite invalid windows with 0
-        y[np.asarray(invalid_bitmap, dtype=bool)] = -1
-        y_mapped = np.zeros_like(y, dtype=int)
-        y_mapped[y == 0] = 1
-        y_mapped[y == 1] = -1
-        y[np.asarray(invalid_bitmap, dtype=bool)] = 0
-        y_list.append(y_mapped)
-
-        if (cluster_healthy_samples + cluster_hemiplegic_samples) > 0:
-            hp_tot = (
-                cluster_healthy_samples /
-                (cluster_healthy_samples + cluster_hemiplegic_samples)
-            ) * 100
+    for i in range(len(estimators)):
+        if y_chunks_per_estimator[i]:
+            y_list.append(np.concatenate(y_chunks_per_estimator[i]))
         else:
-            hp_tot = np.nan
+            y_list.append(np.array([], dtype=float))
 
-        hp_tot_list.append(hp_tot)
+        # Mean probability across all valid windows from all requested subjects.
+        if valid_count[i] > 0:
+            hp_tot_list.append(float(valid_sum[i] / valid_count[i]))
+        else:
+            hp_tot_list.append(np.nan)
 
-    return y_list, hp_tot_list
+    invalid_bitmap = np.concatenate(invalid_chunks) if invalid_chunks else np.array([], dtype=np.uint8)
+
+    return y_list, hp_tot_list, invalid_bitmap
