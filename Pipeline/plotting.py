@@ -83,7 +83,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
 
     for subject_index in subjects_indexes:
         subject = metadata['subject'].iloc[subject_index]
-        predictions, hp_tot_list, invalid_bitmap = predict_samples(data_folder, estimators_list, [subject_index])
+        predictions, hp_tot_list, invalid_bitmap = predict_samples(data_folder, estimators_list, subject_index)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         magnitude_D, magnitude_ND = read_file  (data_folder,
                                                 subject,
