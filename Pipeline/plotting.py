@@ -85,12 +85,12 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         subject = metadata['subject'].iloc[subject_index]
         predictions, hp_tot_list, invalid_bitmap = predict_samples(data_folder, estimators_list, subject_index)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
-        magnitude_D, magnitude_ND = read_file  (data_folder,
+        enmo_D, enmo_ND = read_file  (data_folder,
                                                 subject,
                                                 window_size,
                                                 decimation_factor,
                                                 input_type='week',
-                                                return_mag=1
+                                                return_enmo=1
                                                )
         healthy_percentage.append(hp_tot_list)
         real_aha = metadata['AHA'].iloc[subject_index]
@@ -109,8 +109,8 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
         plt.grid()
         ax = plt.gca()
         ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.plot(timestamps, magnitude_D)
-        plt.plot(timestamps, magnitude_ND)
+        plt.plot(timestamps, enmo_D)
+        plt.plot(timestamps, enmo_ND)
         plt.xlabel("Orario")
         plt.ylabel("Magnitudo")
         plt.gcf().set_size_inches(8, 2)
@@ -126,14 +126,14 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             #axs[0].xaxis.set_minor_locator(matplotlib.ticker.AutoMinorLocator(n=6))
             #axs[0].xaxis.set_minor_formatter(matplotlib.dates.DateFormatter('%H-%M'))
         #axs[0].xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%d-%H:%M'))
-        #axs[0].plot(timestamps, magnitude_D)
-        #axs[0].plot(timestamps, magnitude_ND)
+        #axs[0].plot(timestamps, enmo_D)
+        #axs[0].plot(timestamps, enmo_ND)
 
 
         ########################## AI PLOT ##########################
         ai_list = []
-        subList_magD = [magnitude_D[n:n+block_samples] for n in range(0, len(magnitude_D), block_samples)]
-        subList_magND = [magnitude_ND[n:n+block_samples] for n in range(0, len(magnitude_ND), block_samples)]
+        subList_magD = [enmo_D[n:n+block_samples] for n in range(0, len(enmo_D), block_samples)]
+        subList_magND = [enmo_ND[n:n+block_samples] for n in range(0, len(enmo_ND), block_samples)]
         for l in range(len(subList_magD)):
             if (subList_magD[l].mean() + subList_magND[l].mean()) == 0:
                 ai_list.append(np.nan)
