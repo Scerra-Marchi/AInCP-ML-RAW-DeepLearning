@@ -51,7 +51,10 @@ def create_windows(
 
         y_AHA.extend([metadata.loc[index, 'AHA']] * n_windows)
         y_MACS.extend([metadata.loc[index, 'MACS']] * n_windows)
-        y.extend([metadata.loc[index, 'hemi'] - 1] * n_windows)
+        # Binary target for classifier:
+        # healthy -> 1 when AHA is exactly 100, otherwise hemiplegic/not-healthy -> 0.
+        target = int(metadata.loc[index, 'AHA'] == 100)
+        y.extend([target] * n_windows)
 
     
     return (

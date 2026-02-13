@@ -104,7 +104,8 @@ def train_select_classifiers(
         subjects_indexes = subjects_indexes.tolist()
 
     metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
-    labels = torch.as_tensor(metadata["hemi"].to_numpy() - 1, dtype=torch.long)
+    # Class-1 must represent healthy samples (AHA == 100).
+    labels = torch.as_tensor((metadata["AHA"].to_numpy() == 100).astype("int64"), dtype=torch.long)
     counts = torch.bincount(labels, minlength=2)
     pos_weight_value = float((counts[0] / counts[1]).item())
 

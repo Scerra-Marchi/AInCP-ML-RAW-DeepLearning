@@ -197,7 +197,9 @@ def main() -> None:
     model_names = MODEL_NAMES
 
     metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
-    labels = metadata["hemi"].to_numpy()
+    # Stratify folds using the same classifier target definition:
+    # healthy (AHA == 100) -> 1, otherwise -> 0.
+    labels = (metadata["AHA"].to_numpy() == 100).astype(int)
 
     iterations_root = "Iterations_debug/" if args.debug else "Iterations/"
     if args.reset_iterations and os.path.isdir(iterations_root):
