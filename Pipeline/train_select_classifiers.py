@@ -28,6 +28,16 @@ from skorch_models import (
 )
 from ray.tune import TuneConfig
 
+MODULE_CLASS_BY_NAME = {
+    "LSTM": LSTMSequenceClassifier,
+    "GRU": GRUSequenceClassifier,
+    "RNN": RNNSequenceClassifier,
+    "CNN1D": Conv1DSequenceClassifier,
+    "Transformer": TransformerSequenceClassifier,
+    "Reservoir": ReservoirSequenceClassifier,
+}
+DEFAULT_MODEL_NAMES = tuple(MODULE_CLASS_BY_NAME.keys())
+
 
 def _safe_model_name(name: str) -> str:
     # Make a filesystem-friendly model name for use in output folder paths.
@@ -40,6 +50,40 @@ def _hash_param_grid(param_grid: dict) -> str:
     return hashlib.sha256(payload).hexdigest()[:10]
 
 
+def _make_bce_net(module, pos_weight_value: float):
+    # Build a fresh skorch estimator each time to avoid shared mutable state across trials.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    pos_weight = torch.tensor(pos_weight_value, dtype=torch.float32, device=device)
+    net = NeuralNetBinaryClassifier(
+        module=module,
+        callbacks=[
+            (
+                "early_stopping",
+                EarlyStopping(
+                    monitor="valid_loss",
+                    patience=25,
+                    threshold=1e-4,
+                    threshold_mode="rel",
+                    lower_is_better=True,
+                    load_best=True,
+                ),
+            )
+        ],
+        criterion=nn.BCEWithLogitsLoss,
+        criterion__pos_weight=pos_weight,
+        max_epochs=200,
+        lr=1e-3,
+        batch_size=64,
+        optimizer=torch.optim.AdamW,
+        iterator_train__shuffle=True,
+        train_split=ValidSplit(0.2, stratified=True, random_state=42),
+        device=device,
+        verbose=0,
+    )
+    net.threshold = 0.5
+    return net
+
+
 def train_select_classifiers(
     data_folder,
     save_folder,
@@ -47,7 +91,7 @@ def train_select_classifiers(
     l_window_size=[300, 600, 900],
     l_method=["concat", "difference", "ai"],
     l_decimation_factor=[3],
-    gridsearch_specs_list=None,
+    l_model_name=DEFAULT_MODEL_NAMES,
 ):
     # Main orchestration entry point:
     # 1) define (or accept) model specs + parameter grids,
@@ -55,152 +99,121 @@ def train_select_classifiers(
     # 3) train missing combinations (trials early-exit when artifacts already exist),
     # 4) load and aggregate cv_results.csv across the selected grid.
 
-    if gridsearch_specs_list is None:
-        # Default model specs used when the caller doesn't provide their own list.
-        # NOTE: device selection is passed into skorch (not into the PyTorch modules directly).
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
-        
-        labels = torch.as_tensor(metadata["hemi"].to_numpy() - 1, dtype=torch.long)
-        counts = torch.bincount(labels, minlength=2)
-        pos_weight = (counts[0] / counts[1]).to(device)
+    if hasattr(subjects_indexes, "tolist"):
+        # Normalize pandas/numpy index-like objects to a plain Python list for serialization and Ray.
+        subjects_indexes = subjects_indexes.tolist()
 
-        def _default_callbacks():
-            # Create fresh callback objects per estimator to avoid shared state across clones/fits.
-            return [
-                (
-                    "early_stopping",
-                    EarlyStopping(
-                        monitor="valid_loss",
-                        patience=15,
-                        threshold=1e-4,
-                        threshold_mode="rel",
-                        lower_is_better=True,
-                        load_best=True,
-                    ),
-                )
-            ]
-        
-        def make_bce_net(module):
-            net = NeuralNetBinaryClassifier(
-                module=module,
-                callbacks=_default_callbacks(),
-                criterion=nn.BCEWithLogitsLoss,
-                criterion__pos_weight=pos_weight,
-                max_epochs=100,
-                lr=1e-3,
-                batch_size=64,
-                optimizer=torch.optim.AdamW,
-                iterator_train__shuffle=True,
-                train_split=ValidSplit(0.2, stratified=True, random_state=42),
-                device=device,
-                verbose=0,
-            )
-            net.threshold = 0.5
-            return net
+    metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
+    labels = torch.as_tensor(metadata["hemi"].to_numpy() - 1, dtype=torch.long)
+    counts = torch.bincount(labels, minlength=2)
+    pos_weight_value = float((counts[0] / counts[1]).item())
 
-        gridsearch_specs_list = [
-            {
-                "name": "LSTM",
-                "estimator": make_bce_net(LSTMSequenceClassifier),
-                "param_grid": {
-                    "optimizer__weight_decay": [0.0, 1e-4],
+    # NOTE: only lightweight, picklable fields are kept in specs (no estimator objects).
+    gridsearch_specs_list = [
+        {
+            "name": "LSTM",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False, True],
+            },
+        },
+        {
+            "name": "GRU",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False, True],
+            },
+        },
+        {
+            "name": "RNN",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False],
+                "module__nonlinearity": ["tanh", "relu"],
+            },
+        },
+        {
+            "name": "CNN1D",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "module__channels": [16, 32, 64],
+                "module__kernel_size": [5, 7],
+                "module__dropout": [0.0, 0.3],
+            },
+        },
+        {
+            "name": "Transformer",
+            # Use a list of grids to avoid invalid (d_model, nhead) combinations.
+            "param_grid": [
+                {
+                    "optimizer__weight_decay": [1e-4],
                     "lr": [3e-4, 1e-3],
-                    "module__hidden_size": [32, 64],
-                    "module__num_layers": [1, 2],
-                    "module__dropout": [0.0, 0.2],
-                    "module__bidirectional": [False, True],
+                    "batch_size": [16, 32],
+                    "module__d_model": [32],
+                    "module__nhead": [4, 8],
+                    "module__num_layers": [2, 3],
+                    "module__dim_feedforward": [128],
+                    "module__dropout": [0.1],
+                    "module__patch_size": [32],
                 },
-            },
-            {
-                "name": "GRU",
-                "estimator": make_bce_net(GRUSequenceClassifier),
-                "param_grid": {
-                    "optimizer__weight_decay": [0.0, 1e-4],
+                {
+                    "optimizer__weight_decay": [1e-4],
                     "lr": [3e-4, 1e-3],
-                    "module__hidden_size": [32, 64],
-                    "module__num_layers": [1, 2],
-                    "module__dropout": [0.0, 0.2],
-                    "module__bidirectional": [False, True],
+                    "batch_size": [16, 32],
+                    "module__d_model": [64],
+                    "module__nhead": [8],
+                    "module__num_layers": [2, 3],
+                    "module__dim_feedforward": [256],
+                    "module__dropout": [0.1],
+                    "module__patch_size": [32],
                 },
+            ],
+        },
+        {
+            "name": "Reservoir",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0],
+                "lr": [1e-3],
+                "module__reservoir_size": [200, 400],
+                "module__spectral_radius": [0.8, 0.9, 1.0],
+                "module__leak_rate": [1.0],
+                "module__input_scaling": [0.2, 0.5],
+                "module__downsample": [8, 16],
             },
-            {
-                "name": "RNN",
-                "estimator": make_bce_net(RNNSequenceClassifier),
-                "param_grid": {
-                    "optimizer__weight_decay": [0.0, 1e-4],
-                    "lr": [3e-4, 1e-3],
-                    "module__hidden_size": [32, 64],
-                    "module__num_layers": [1, 2],
-                    "module__dropout": [0.0, 0.2],
-                    "module__bidirectional": [False],
-                    "module__nonlinearity": ["tanh", "relu"],
-                },
-            },
-            {
-                "name": "CNN1D",
-                "estimator": make_bce_net(Conv1DSequenceClassifier),
-                "param_grid": {
-                    "optimizer__weight_decay": [0.0, 1e-4],
-                    "lr": [3e-4, 1e-3],
-                    "module__channels": [16, 32, 64],
-                    "module__kernel_size": [5, 7],
-                    "module__dropout": [0.0, 0.3],
-                },
-            },
-            {
-                "name": "Transformer",
-                "estimator": make_bce_net(TransformerSequenceClassifier),
-                # Use a list of grids to avoid invalid (d_model, nhead) combinations.
-                "param_grid": [
-                    {
-                        "optimizer__weight_decay": [1e-4],
-                        "lr": [3e-4, 1e-3],
-                        "batch_size": [16, 32],
-                        "module__d_model": [32],
-                        "module__nhead": [4, 8],
-                        "module__num_layers": [2, 3],
-                        "module__dim_feedforward": [128],
-                        "module__dropout": [0.1],
-                        "module__patch_size": [32],
-                    },
-                    {
-                        "optimizer__weight_decay": [1e-4],
-                        "lr": [3e-4, 1e-3],
-                        "batch_size": [16, 32],
-                        "module__d_model": [64],
-                        "module__nhead": [8],
-                        "module__num_layers": [2, 3],
-                        "module__dim_feedforward": [256],
-                        "module__dropout": [0.1],
-                        "module__patch_size": [32],
-                    },
-                ],
-            },
-            {
-                "name": "Reservoir",
-                "estimator": make_bce_net(ReservoirSequenceClassifier),
-                "param_grid": {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [1e-3],
-                    "module__reservoir_size": [200, 400],
-                    "module__spectral_radius": [0.8, 0.9, 1.0],
-                    "module__leak_rate": [1.0],
-                    "module__input_scaling": [0.2, 0.5],
-                    "module__downsample": [8, 16],
-                },
-            },
-        ]
+        },
+    ]
+
+    # Allow selecting a subset of default models without editing training internals.
+    selected_names = list(l_model_name)
+    if len(set(selected_names)) != len(selected_names):
+        raise ValueError("l_model_name must contain unique model names.")
+    default_specs_by_name = {spec["name"]: spec for spec in gridsearch_specs_list}
+    unknown = [name for name in selected_names if name not in default_specs_by_name]
+    if unknown:
+        raise ValueError(
+            "Unsupported model names in l_model_name: "
+            f"{unknown}. Supported names: {sorted(default_specs_by_name.keys())}."
+        )
+    gridsearch_specs_list = [default_specs_by_name[name] for name in selected_names]
 
     # Aggregation happens after Tune completes by iterating over Tune's trial configs and reading each run's
     # `cv_results.csv` from its deterministic output folder.
 
     # Capture the directory containing this file so Ray workers can reliably `chdir` for local imports.
     pipeline_dir = os.path.dirname(os.path.abspath(__file__))
-    if hasattr(subjects_indexes, "tolist"):
-        # Normalize pandas/numpy index-like objects to a plain Python list for serialization and Ray.
-        subjects_indexes = subjects_indexes.tolist()
 
     def _artifacts_exist(gridsearch_folder: str) -> bool:
         # Key artifacts produced by train_best_model.
@@ -236,6 +249,7 @@ def train_select_classifiers(
         subjects_indexes,
         gridsearch_specs_list,
         model_name_to_idx,
+        pos_weight_value,
     ):
         # Ray Tune trainable: receives one point in the Cartesian product.
         # Ensure local imports and relative paths resolve consistently inside the worker process.
@@ -264,11 +278,14 @@ def train_select_classifiers(
         # Import inside the Ray worker after chdir so local imports work.
         from train_best_model import train_best_model
 
+        module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
+        estimator = _make_bce_net(module, pos_weight_value)
+
         train_best_model(
             data_folder,
             subjects_indexes,
             gridsearch_folder,
-            gridsearch_specs["estimator"],
+            estimator,
             gridsearch_specs["param_grid"],
             method,
             window_size,
@@ -289,6 +306,7 @@ def train_select_classifiers(
         subjects_indexes=subjects_indexes,
         gridsearch_specs_list=gridsearch_specs_list,
         model_name_to_idx=model_name_to_idx,
+        pos_weight_value=pos_weight_value,
     )
 
     param_space = {

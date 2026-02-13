@@ -21,6 +21,8 @@ DATA_FOLDER = "../Dataset/"
 
 WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
 DECIMATION_FACTOR = 3
+MODEL_NAMES = ["LSTM", "GRU", "RNN", "CNN1D", "Transformer", "Reservoir"]
+METHODS = ["concat", "difference", "ai", "enmo", "raw"]
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
 CV_MIN_MEAN_TEST_SCORE = 0.7
@@ -51,6 +53,7 @@ def _run_iteration(
     window_size: int,
     decimation_factor: int,
     methods: list,
+    model_names: list,
 ) -> None:
     os.makedirs(save_folder, exist_ok=True)
 
@@ -64,6 +67,7 @@ def _run_iteration(
             l_window_size=[window_size],
             l_method=methods,
             l_decimation_factor=[decimation_factor],
+            l_model_name=model_names,
         )
 
     print(" ----- TRAINING REGRESSOR ----- ")
@@ -189,7 +193,8 @@ def main() -> None:
     if args.iterations < 1 or args.iterations > TOTAL_FOLDS:
         raise SystemExit(f"--iterations must be between 1 and {TOTAL_FOLDS}")
 
-    methods = ["raw"] if args.debug else ['concat', 'difference', 'ai', 'enmo', 'raw']
+    methods = ["raw"] if args.debug else METHODS
+    model_names = MODEL_NAMES
 
     metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
     labels = metadata["hemi"].to_numpy()
@@ -245,6 +250,7 @@ def main() -> None:
             window_size=WINDOW_SIZE,
             decimation_factor=DECIMATION_FACTOR,
             methods=methods,
+            model_names=model_names,
         )
 
     _aggregate_results(iterations_root, args.iterations)
