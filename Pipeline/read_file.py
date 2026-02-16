@@ -21,7 +21,7 @@ def read_file(
     WINDOW_SIZE,
     decimation_factor,
     input_type='AHA',
-    return_mag=0
+    return_enmo=0
 ):
     
     df = pd.read_csv(f"{data_folder}{input_type}/{subject}_{input_type}_RAW.csv", usecols=["x_D", "y_D", "z_D",'x_ND', 'y_ND', 'z_ND'], engine="pyarrow")
@@ -41,8 +41,8 @@ def read_file(
     D = df_cut[['x_D', 'y_D', 'z_D']].to_numpy()
     ND = df_cut[['x_ND', 'y_ND', 'z_ND']].to_numpy()
     
-    if(return_mag):
-        D = np.linalg.norm(D, axis=1)
-        ND = np.linalg.norm(ND, axis=1)
+    if(return_enmo):
+        D = np.maximum(np.linalg.norm(D, axis=1) - 1.0, 0.0)
+        ND =  np.maximum(np.linalg.norm(ND, axis=1) - 1.0, 0.0)
 
     return D, ND

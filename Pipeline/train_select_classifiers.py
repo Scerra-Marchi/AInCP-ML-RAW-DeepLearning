@@ -192,7 +192,6 @@ def train_select_classifiers(
                 "module__spectral_radius": [0.8, 0.9, 1.0],
                 "module__leak_rate": [1.0],
                 "module__input_scaling": [0.2, 0.5],
-                "module__downsample": [8, 16],
             },
         },
     ]
