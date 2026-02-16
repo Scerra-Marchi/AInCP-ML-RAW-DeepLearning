@@ -31,15 +31,16 @@ subjects_indexes = list(range(len(metadata)))
 
 # Random state = 42
 sss = StratifiedShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
-train_indexes, test_indexes = next(sss.split(metadata, metadata['hemi']))
+strat_labels = (metadata['AHA'].to_numpy() == 100).astype(int)
+train_indexes, test_indexes = next(sss.split(metadata, strat_labels))
 
 if args.debug:
     rng = np.random.default_rng(42)
     train_idx = np.array(train_indexes, dtype=int)
     test_idx = np.array(test_indexes, dtype=int)
 
-    train_labels = metadata['hemi'].iloc[train_idx].to_numpy()
-    test_labels = metadata['hemi'].iloc[test_idx].to_numpy()
+    train_labels = (metadata['AHA'].iloc[train_idx].to_numpy() == 100).astype(int)
+    test_labels = (metadata['AHA'].iloc[test_idx].to_numpy() == 100).astype(int)
 
     def _subset(indexes: np.ndarray, labels: np.ndarray, n_per_class: int) -> np.ndarray:
         out = []

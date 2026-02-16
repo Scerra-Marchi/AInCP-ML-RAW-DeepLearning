@@ -8,7 +8,6 @@ from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
 
 def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
-    model = clone(estimator)
 
     X, _, _, y, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
     X = np.asarray(X)
@@ -17,13 +16,13 @@ def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator
 
 
     parameter_tuning_method = GridSearchCV(
-        model,
+        clone(estimator),
         param_grid,
         cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
         n_jobs=1,
         return_train_score=True,
         verbose=0,
-        scoring="balanced_accuracy"
+        scoring="f1_macro", # Equal importance for classes via macro averaging.
     )
     parameter_tuning_method.fit(X, y)
 
