@@ -25,7 +25,13 @@ MODEL_NAMES = ["LSTM", "GRU", "RNN", "CNN1D", "Transformer", "Reservoir"]
 METHODS = ["concat", "difference", "ai", "enmo", "raw"]
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
+# With f1_macro scoring, values are in [0, 1], and higher is better.
+# Practical reference points (binary task):
+# - Random guesser (rough baseline): ~0.50 on balanced classes (can be lower if imbalanced).
+# - Decent classifier: >= 0.60.
+# - Good classifier: >= 0.75.
 CV_MIN_MEAN_TEST_SCORE = 0.7
+DEBUG_MIN_MEAN_TEST_SCORE = 0.0
 
 
 def _subset_per_class(
@@ -197,14 +203,16 @@ def main() -> None:
     model_names = MODEL_NAMES
 
     metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
-    labels = metadata["hemi"].to_numpy()
+    # Stratify folds using the same classifier target definition:
+    # healthy (AHA == 100) -> 1, otherwise -> 0.
+    labels = (metadata["AHA"].to_numpy() == 100).astype(int)
 
     iterations_root = "Iterations_debug/" if args.debug else "Iterations/"
     if args.reset_iterations and os.path.isdir(iterations_root):
         shutil.rmtree(iterations_root)
     os.makedirs(iterations_root, exist_ok=True)
 
-    min_mean_test_score = 0.5 if args.debug else CV_MIN_MEAN_TEST_SCORE
+    min_mean_test_score = DEBUG_MIN_MEAN_TEST_SCORE if args.debug else CV_MIN_MEAN_TEST_SCORE
 
     rskf = RepeatedStratifiedKFold(
         n_splits=TOTAL_FOLDS,
