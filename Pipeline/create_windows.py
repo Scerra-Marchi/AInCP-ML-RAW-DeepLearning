@@ -11,7 +11,7 @@ def create_windows(
     WINDOW_SIZE,
     decimation_factor,
     input_type='AHA',
-    std_tol=0.02  # soglia std per considerare una finestra "ferma" per ciascuna feature
+    std_tol=0.005  # soglia std per considerare una finestra "ferma" per ciascuna feature
 ):
 
     series = []
