@@ -8,7 +8,7 @@ from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
 import math
-from train_regressor import regressor_hash_from_estimators_specs
+from train_regressor import regressor_hash_from_estimators_specs, build_regressor_sequence
 from read_file import read_file
 
 
@@ -93,16 +93,18 @@ def plot_dashboards(
             subject_metadata,
         )
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
+        regressor_sequence = build_regressor_sequence(predictions, invalid_bitmap)
+        window_timestamps = timestamps[::window_size][:regressor_sequence.shape[0]]
         enmo_D, enmo_ND = read_file  (data_folder,
                                                 subject,
                                                 window_size,
                                                 decimation_factor,
                                                 input_type='week',
                                                 return_enmo=1
-                                               )
+        )
         healthy_percentage.append(hp_tot_list)
         real_aha = subject_metadata['AHA']
-        predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
+        predicted_aha = regressor.predict(regressor_sequence[np.newaxis, :, :])[0]
         predicted_aha = float(np.clip(predicted_aha, 0, 100))
         predicted_aha_list.append(predicted_aha)
 
@@ -253,7 +255,7 @@ def plot_dashboards(
 
             plot_h_perc_list_smooth = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth
 
-            plt.plot(timestamps[::window_size], plot_h_perc_list_smooth)
+            plt.plot(window_timestamps, plot_h_perc_list_smooth)
 
 
         plt.xlabel("Orario")
@@ -272,7 +274,7 @@ def plot_dashboards(
         ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
         plt.axhline(y = significativity_threshold, color = 'r', linestyle = '-', label='Soglia')
         plot_h_perc_list_smooth_significativity = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth_significativity
-        plt.plot(timestamps[::window_size], plot_h_perc_list_smooth_significativity)
+        plt.plot(window_timestamps, plot_h_perc_list_smooth_significativity)
         plt.legend()
         plt.xlabel("Orario")
         plt.ylabel("Significatività")
@@ -285,15 +287,20 @@ def plot_dashboards(
 
 
         aha_list_smooth = []
-        for elements in zip(*h_perc_list_smooth_list):
-            if np.isnan(elements[0]):
+        for start in range(0, regressor_sequence.shape[0] - trend_block_size + 1):
+            stop = start + trend_block_size
+            invalid_window = invalid_mask[start:stop]
+            valid_count_window = int((~invalid_window).sum())
+            valid_ratio = (valid_count_window / invalid_window.size) * 100
+
+            if valid_ratio < significativity_threshold or valid_count_window == 0:
                 aha_list_smooth.append(np.nan)
             else:
-                predicted_window_aha = regressor.predict(np.array([elements]))[0]
+                seq_window = regressor_sequence[start:stop]
+                predicted_window_aha = regressor.predict(seq_window[np.newaxis, :, :])[0]
                 aha_list_smooth.append(float(np.clip(predicted_window_aha, 0, 100)))
 
         #plt.title('Andamento Home-AHA')
-        conf = 5
         plt.grid()
         ax = plt.gca()
         ax.set_ylim([-1,101])
@@ -303,7 +310,7 @@ def plot_dashboards(
         plt.ylabel("Home-AHA")
         plot_aha_list_smooth = [np.nan] * (trend_block_size - 1) + aha_list_smooth
         # switch to green
-        plt.plot(timestamps[::window_size],plot_aha_list_smooth, c = 'green') 
+        plt.plot(window_timestamps, plot_aha_list_smooth, c='green')
         # will comment this stuff
         #plt.plot(timestamps[::window_size],[x if real_aha + conf < x else np.nan for x in plot_aha_list_smooth], c ='green')
         #plt.plot(timestamps[::window_size],[x if real_aha + 2*conf < x else np.nan for x in plot_aha_list_smooth], c ='darkgreen')
