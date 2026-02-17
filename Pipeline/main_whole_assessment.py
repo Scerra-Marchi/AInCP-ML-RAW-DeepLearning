@@ -176,6 +176,24 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
         json.dump(results, file, indent=4)
 
 
+def _purge_prediction_caches(iterations_root: str) -> int:
+    """
+    Delete estimator prediction cache folders under Trained_models.
+    Returns the number of removed directories.
+    """
+    removed = 0
+    for root, dirs, _ in os.walk(iterations_root):
+        if "Trained_models" not in root:
+            continue
+        cache_dir_name = "pred_cache"
+        if cache_dir_name in dirs:
+            cache_path = os.path.join(root, cache_dir_name)
+            shutil.rmtree(cache_path)
+            dirs.remove(cache_dir_name)
+            removed += 1
+    return removed
+
+
 def main() -> None:
     # Ensure relative paths behave like before.
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -196,6 +214,12 @@ def main() -> None:
         "--debug",
         action="store_true",
         help="Run a tiny stratified subset per fold for quick sanity checks.",
+    )
+    parser.add_argument(
+        "--purge-pred-caches",
+        dest="purge_pred_caches",
+        action="store_true",
+        help="Delete all estimator prediction cache folders (pred_cache/) under Trained_models in the selected iterations root before running.",
     )
     args = parser.parse_args()
 
@@ -221,6 +245,9 @@ def main() -> None:
     if args.reset_iterations and os.path.isdir(iterations_root):
         shutil.rmtree(iterations_root)
     os.makedirs(iterations_root, exist_ok=True)
+    if args.purge_pred_caches:
+        removed_caches = _purge_prediction_caches(iterations_root)
+        print(f" ----- PURGED {removed_caches} prediction cache folder(s) ----- ")
 
     min_mean_test_score = DEBUG_MIN_MEAN_TEST_SCORE if args.debug else CV_MIN_MEAN_TEST_SCORE
 
