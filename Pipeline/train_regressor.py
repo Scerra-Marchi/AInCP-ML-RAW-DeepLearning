@@ -25,12 +25,15 @@ def regressor_hash_from_estimators_specs(estimators_specs_list) -> str:
     return hashlib.sha256(json.dumps(specs, separators=(",", ":")).encode()).hexdigest()[:10]
 
 
-def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score, window_size, decimation_factor):
-
+def train_regressor(
+    data_folder,
+    save_folder,
+    metadata,
+    min_mean_test_score=None,
+    window_size=None,
+    decimation_factor=None,
+):
     best_estimators_df = pd.read_csv(save_folder + 'best_estimators_results.csv', index_col=0).sort_values(by=['mean_test_score', 'std_test_score'], ascending=False)
-
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx')
-    metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True) # rimossi 'age_aha', 'gender'
 
     # Caricamento dei classificatori
 
@@ -53,16 +56,20 @@ def train_regressor(data_folder, save_folder, train_indexes, min_mean_test_score
 
     hp_tot_list_list = []   # Contiene i CPI calcolati per ogni paziente
 
-    for index in train_indexes:
-        print('REGRESSOR: PATIENT ', metadata['subject'].iloc[index], 'BEGIN')
-        _, hp_tot_list, _ = predict_samples(data_folder, estimators_list, index)
+    for _, subject_metadata in metadata.iterrows():
+        print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'BEGIN')
+        _, hp_tot_list, _ = predict_samples(
+            data_folder,
+            estimators_list,
+            subject_metadata,
+        )
         hp_tot_list_list.append(hp_tot_list)
-        print('REGRESSOR: PATIENT ', metadata['subject'].iloc[index], 'END')
+        print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'END')
         sys.stdout.flush()
         sys.stderr.flush()
 
     X = np.array(hp_tot_list_list)
-    y = np.array(metadata['AHA'].iloc[train_indexes].values)
+    y = np.array(metadata['AHA'].values)
 
     model = LinearRegression()
     print('REGRESSOR: START FIT')

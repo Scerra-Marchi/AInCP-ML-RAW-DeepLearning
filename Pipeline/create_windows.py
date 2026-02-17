@@ -1,4 +1,3 @@
-import pandas as pd
 import numpy as np
 from elaborate_magnitude import elaborate_magnitude
 from read_file import read_file
@@ -6,14 +5,13 @@ from read_file import read_file
 
 def create_windows(
     data_folder,
-    subjects_indexes,
+    metadata,
     operation_type,
     WINDOW_SIZE,
     decimation_factor,
     input_type='AHA',
     std_tol=0.005  # soglia std per considerare una finestra "ferma" per ciascuna feature
 ):
-
     series = []
     y_AHA = []
     y_MACS = []
@@ -21,20 +19,17 @@ def create_windows(
 
     per_subject_data = []
 
-    metadata = pd.read_excel(
-        data_folder + 'metadata2023_08.xlsx'
-    ).iloc[subjects_indexes].reset_index(drop=True)
-
     # ==========================================================
     # PASS 1 → creazione finestre raw per ciascun soggetto
     # ==========================================================
 
-    for index in range(metadata.shape[0]):
+    for _, subject_metadata in metadata.iterrows():
+        subject = int(subject_metadata['subject'])
 
         # Legge i dati raw dei due polsi
         D, ND = read_file(
             data_folder,
-            metadata.loc[index, 'subject'],
+            subject,
             WINDOW_SIZE,
             decimation_factor,
             input_type=input_type
@@ -45,7 +40,7 @@ def create_windows(
         D_w = D.reshape(n_windows, WINDOW_SIZE, 3)
         ND_w = ND.reshape(n_windows, WINDOW_SIZE, 3)
 
-        per_subject_data.append((D_w, ND_w))
+        per_subject_data.append((subject_metadata, D_w, ND_w))
 
     # ==========================================================
     # PASS 2 → costruzione bitmap finestre non significative
@@ -53,7 +48,7 @@ def create_windows(
 
     invalid_bitmap = []
 
-    for index, (D_w, ND_w) in enumerate(per_subject_data):
+    for subject_metadata, D_w, ND_w in per_subject_data:
 
         n_windows = D_w.shape[0]
 
@@ -76,11 +71,11 @@ def create_windows(
 
         series.append(features)
 
-        y_AHA.extend([metadata.loc[index, 'AHA']] * n_windows)
-        y_MACS.extend([metadata.loc[index, 'MACS']] * n_windows)
+        y_AHA.extend([subject_metadata['AHA']] * n_windows)
+        y_MACS.extend([subject_metadata['MACS']] * n_windows)
         # Binary target for classifier:
         # healthy -> 1 when AHA is exactly 100, otherwise hemiplegic/not-healthy -> 0.
-        target = int(metadata.loc[index, 'AHA'] == 100)
+        target = int(subject_metadata['AHA'] == 100)
         y.extend([target] * n_windows)
 
     return (

@@ -52,6 +52,7 @@ def _subset_per_class(
 def _run_iteration(
     *,
     data_folder: str,
+    metadata: pd.DataFrame,
     save_folder: str,
     train_indexes: Iterable[int],
     test_indexes: Iterable[int],
@@ -62,6 +63,8 @@ def _run_iteration(
     model_names: list,
 ) -> None:
     os.makedirs(save_folder, exist_ok=True)
+    train_metadata = metadata.iloc[list(train_indexes)].reset_index(drop=True)
+    test_metadata = metadata.iloc[list(test_indexes)].reset_index(drop=True)
 
     best_estimators_csv = os.path.join(save_folder, "best_estimators_results.csv")
     if not os.path.exists(best_estimators_csv):
@@ -69,7 +72,7 @@ def _run_iteration(
         train_select_classifiers(
             data_folder,
             save_folder=save_folder,
-            subjects_indexes=list(train_indexes),
+            metadata=train_metadata.copy(),
             l_window_size=[window_size],
             l_method=methods,
             l_decimation_factor=[decimation_factor],
@@ -80,7 +83,7 @@ def _run_iteration(
     train_regressor(
         data_folder,
         save_folder=save_folder,
-        train_indexes=list(train_indexes),
+        metadata=train_metadata.copy(),
         min_mean_test_score=min_mean_test_score,
         window_size=window_size,
         decimation_factor=decimation_factor,
@@ -92,7 +95,7 @@ def _run_iteration(
         test_classifier_regressor(
             data_folder,
             save_folder=save_folder,
-            test_indexes=list(test_indexes),
+            metadata=test_metadata.copy(),
             min_mean_test_score=min_mean_test_score,
             window_size=window_size,
             decimation_factor=decimation_factor,
@@ -104,7 +107,7 @@ def _run_iteration(
         plot_dashboards(
             data_folder,
             save_folder=save_folder,
-            subjects_indexes=list(test_indexes),
+            metadata=test_metadata.copy(),
             min_mean_test_score=min_mean_test_score,
             window_size=window_size,
             decimation_factor=decimation_factor,
@@ -202,7 +205,14 @@ def main() -> None:
     methods = ["raw"] if args.debug else METHODS
     model_names = MODEL_NAMES
 
-    metadata = pd.read_excel(os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"))
+    metadata = pd.read_excel(
+        os.path.join(DATA_FOLDER, "metadata2023_08.xlsx"),
+        usecols=[
+            "subject",
+            "MACS",
+            "AHA",
+        ],
+    )
     # Stratify folds using the same classifier target definition:
     # healthy (AHA == 100) -> 1, otherwise -> 0.
     labels = (metadata["AHA"].to_numpy() == 100).astype(int)
@@ -251,6 +261,7 @@ def main() -> None:
         print(f" ----- ITERATION {iteration} / {args.iterations - 1} ----- ")
         _run_iteration(
             data_folder=DATA_FOLDER,
+            metadata=metadata,
             save_folder=save_folder,
             train_indexes=train_indexes,
             test_indexes=test_indexes,

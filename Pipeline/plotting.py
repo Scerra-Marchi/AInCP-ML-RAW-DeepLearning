@@ -19,8 +19,14 @@ def create_timestamps_list(data_folder):
     return timestamps_list
 
 
-def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_score, window_size, decimation_factor):
-        
+def plot_dashboards(
+    data_folder,
+    save_folder,
+    metadata,
+    min_mean_test_score=None,
+    window_size=None,
+    decimation_factor=None,
+):
     #warnings.filterwarnings("ignore")
 
     # Cambio la directory di esecuzione in quella dove si trova questo file
@@ -55,8 +61,6 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     
     print('Expected estimators: ',len(estimators_specs_list))
 
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx', usecols=['subject', 'MACS', 'age_aha', 'hemi', 'gender', 'side_hemi', 'AHA', 'AI_aha', 'AI_week',])
-
     reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
     regressor = jl.load(reg_path)
 
@@ -81,9 +85,13 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
     healthy_percentage = []
     predicted_aha_list = []
 
-    for subject_index in subjects_indexes:
-        subject = metadata['subject'].iloc[subject_index]
-        predictions, hp_tot_list, invalid_bitmap = predict_samples(data_folder, estimators_list, subject_index)
+    for _, subject_metadata in metadata.iterrows():
+        subject = int(subject_metadata['subject'])
+        predictions, hp_tot_list, invalid_bitmap = predict_samples(
+            data_folder,
+            estimators_list,
+            subject_metadata,
+        )
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         enmo_D, enmo_ND = read_file  (data_folder,
                                                 subject,
@@ -93,7 +101,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
                                                 return_enmo=1
                                                )
         healthy_percentage.append(hp_tot_list)
-        real_aha = metadata['AHA'].iloc[subject_index]
+        real_aha = subject_metadata['AHA']
         predicted_aha = regressor.predict(np.array([hp_tot_list]))[0]
         predicted_aha = float(np.clip(predicted_aha, 0, 100))
         predicted_aha_list.append(predicted_aha)
@@ -316,7 +324,7 @@ def plot_dashboards(data_folder, save_folder, subjects_indexes, min_mean_test_sc
             plt.show() 
         plt.close()
 
-    metadata_out = metadata.iloc[subjects_indexes].copy()
+    metadata_out = metadata.copy()
     metadata_out['healthy_percentage'] = healthy_percentage
     metadata_out['predicted_aha'] = predicted_aha_list
 

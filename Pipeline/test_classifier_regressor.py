@@ -6,12 +6,15 @@ from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
 from train_regressor import regressor_hash_from_estimators_specs
 
-def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_test_score, window_size, decimation_factor):
-
+def test_classifier_regressor(
+    data_folder,
+    save_folder,
+    metadata,
+    min_mean_test_score=None,
+    window_size=None,
+    decimation_factor=None,
+):
     best_estimators_df = pd.read_csv(save_folder + 'best_estimators_results.csv', index_col=0).sort_values(by=['mean_test_score', 'std_test_score'], ascending=False)
-
-    metadata = pd.read_excel(data_folder + 'metadata2023_08.xlsx')
-    metadata.drop(['dom', 'date AHA', 'start AHA', 'stop AHA'], axis=1, inplace=True)   # rimossi 'age_aha', 'gender' 
 
     estimators_specs_list, estimators_list = build_estimators_list(
         best_estimators_df=best_estimators_df,
@@ -24,8 +27,12 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
 
     hp_tot_list_list = []
     
-    for index in test_indexes:
-        _, hp_tot, _ = predict_samples(data_folder, estimators_list, index)
+    for _, subject_metadata in metadata.iterrows():
+        _, hp_tot, _ = predict_samples(
+            data_folder,
+            estimators_list,
+            subject_metadata,
+        )
         hp_tot_list_list.append(hp_tot)
 
         #   hp_tot_list_list =                 y =
@@ -35,13 +42,13 @@ def test_classifier_regressor(data_folder, save_folder, test_indexes, min_mean_t
         #    [ 95.0, 90.0, 80.0]]               34]
 
     # Alternative
-    #for i in range (metadata.shape[0]):
-    #    _, hp_tot, _ = predict_samples(data_folder, estimators_list, metadata['subject'].iloc[i])
+    #for _, subject_metadata in metadata.iterrows():
+    #    _, hp_tot, _ = predict_samples(data_folder, estimators_list, subject_metadata)
     #    x.append(hp_tot[0])
-    #    y.append(metadata['AHA'].iloc[i])
+    #    y.append(subject_metadata['AHA'])
 
     X = np.array(hp_tot_list_list)
-    y = np.array(metadata['AHA'].iloc[test_indexes].values)
+    y = np.array(metadata['AHA'].values)
 
     # Organizing data into a dictionary
     data_corrcoef = {

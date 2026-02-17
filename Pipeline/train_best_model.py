@@ -7,9 +7,15 @@ from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
 
-def train_best_model(data_folder, subjects_indexes, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
-
-    X, _, _, y, _= create_windows(data_folder, subjects_indexes, method, window_size, decimation_factor, 'AHA')
+def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
+    X, _, _, y, _ = create_windows(
+        data_folder=data_folder,
+        metadata=metadata,
+        operation_type=method,
+        WINDOW_SIZE=window_size,
+        decimation_factor=decimation_factor,
+        input_type='AHA',
+    )
     X = np.asarray(X)
     # lo trasformiamo in float per utilizzare la BCE
     y = np.asarray(y, dtype=np.float32)
