@@ -47,9 +47,9 @@ def build_estimators_list(best_estimators_df, save_folder, min_mean_test_score, 
     return estimators_specs_list, estimators_list
 
 
-def predict_samples(data_folder, estimators, subject_index):
+def predict_samples(data_folder, estimators, metadata_subject):
     """
-    Predict window probabilities for the requested metadata indexes.
+    Predict window probabilities for one subject row from metadata.
     Returns:
     - y_list: one concatenated probability vector per estimator
     - hp_tot_list: one mean(valid probability) per estimator
@@ -68,17 +68,13 @@ def predict_samples(data_folder, estimators, subject_index):
     window_size = estimators[0]["window_size"]
     decimation_factor = estimators[0]["decimation_factor"]
 
-    # subject_indexes are metadata row indexes; we map them to subject IDs for cache filenames.
-    metadata_subjects = pd.read_excel(data_folder + "metadata2023_08.xlsx", usecols=["subject"])
-
     # We accumulate per subject and concatenate only once at the end.
     y_chunks_per_estimator = [[] for _ in estimators]
     valid_sum = np.zeros(len(estimators), dtype=float)
     valid_count = np.zeros(len(estimators), dtype=int)
     invalid_chunks = []
 
-
-    subject = metadata_subjects["subject"].iloc[int(subject_index)]
+    subject = str(int(metadata_subject["subject"]))
 
     cache_paths = []
     missing_methods = set()
@@ -102,7 +98,7 @@ def predict_samples(data_folder, estimators, subject_index):
     for method in missing_methods:
         X, _, _, _, invalid_bitmap = create_windows(
             data_folder=data_folder,
-            subjects_indexes=[int(subject_index)],
+            metadata=metadata_subject.to_frame().T, # Turn the Series into a single-row DataFrame
             operation_type=method,
             WINDOW_SIZE=window_size,
             decimation_factor=decimation_factor,

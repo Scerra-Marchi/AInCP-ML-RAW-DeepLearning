@@ -87,7 +87,7 @@ def _make_bce_net(module, pos_weight_value: float):
 def train_select_classifiers(
     data_folder,
     save_folder,
-    subjects_indexes,
+    metadata,
     l_window_size=[300, 600, 900],
     l_method=["concat", "difference", "ai"],
     l_decimation_factor=[3],
@@ -99,11 +99,6 @@ def train_select_classifiers(
     # 3) train missing combinations (trials early-exit when artifacts already exist),
     # 4) load and aggregate cv_results.csv across the selected grid.
 
-    if hasattr(subjects_indexes, "tolist"):
-        # Normalize pandas/numpy index-like objects to a plain Python list for serialization and Ray.
-        subjects_indexes = subjects_indexes.tolist()
-
-    metadata = pd.read_excel(data_folder + "metadata2023_08.xlsx").iloc[subjects_indexes].reset_index(drop=True)
     # Class-1 must represent healthy samples (AHA == 100).
     labels = torch.as_tensor((metadata["AHA"].to_numpy() == 100).astype("int64"), dtype=torch.long)
     counts = torch.bincount(labels, minlength=2)
@@ -246,7 +241,7 @@ def train_select_classifiers(
         config,
         pipeline_dir,
         data_folder,
-        subjects_indexes,
+        metadata,
         gridsearch_specs_list,
         model_name_to_idx,
         pos_weight_value,
@@ -282,14 +277,14 @@ def train_select_classifiers(
         estimator = _make_bce_net(module, pos_weight_value)
 
         train_best_model(
-            data_folder,
-            subjects_indexes,
-            gridsearch_folder,
-            estimator,
-            gridsearch_specs["param_grid"],
-            method,
-            window_size,
-            decimation_factor,
+            data_folder=data_folder,
+            metadata=metadata,
+            gridsearch_folder=gridsearch_folder,
+            estimator=estimator,
+            param_grid=gridsearch_specs["param_grid"],
+            method=method,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
         )
 
     # Start (or connect to) a Ray runtime.
@@ -303,7 +298,7 @@ def train_select_classifiers(
         _ray_train_best_model,
         pipeline_dir=pipeline_dir,
         data_folder=data_folder,
-        subjects_indexes=subjects_indexes,
+        metadata=metadata,
         gridsearch_specs_list=gridsearch_specs_list,
         model_name_to_idx=model_name_to_idx,
         pos_weight_value=pos_weight_value,
