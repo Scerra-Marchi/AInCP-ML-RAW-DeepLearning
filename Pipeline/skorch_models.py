@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from skorch import NeuralNetBinaryClassifier
-from skorch.callbacks import EarlyStopping
+from skorch.callbacks import EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
 
 
@@ -21,6 +21,24 @@ def make_bce_net(module, pos_weight_value: float):
     net = NeuralNetBinaryClassifier(
         module=module,
         callbacks=[
+            (
+                "train_f1",
+                EpochScoring(
+                    scoring="f1_macro",
+                    on_train=True,
+                    lower_is_better=False,
+                    name="train_f1",
+                ),
+            ),
+            (
+                "valid_f1",
+                EpochScoring(
+                    scoring="f1_macro",
+                    on_train=False,
+                    lower_is_better=False,
+                    name="valid_f1",
+                ),
+            ),
             (
                 "early_stopping",
                 EarlyStopping(
