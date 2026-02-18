@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 from torch import nn
 from skorch import NeuralNetRegressor
-from sklearn.model_selection import GridSearchCV, KFold, ParameterGrid
+from sklearn.model_selection import GridSearchCV, ParameterGrid, StratifiedKFold
 from predict_samples import build_estimators_list, predict_samples
 from skorch_models import GRUSequenceClassifier
 import os
@@ -106,18 +106,22 @@ def _build_gru_regressor():
     )
 
 
-def _fit_gru_with_grid_search(X, y, save_folder, reg_path):
+def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path):
     if y.size < 2:
         model = _build_gru_regressor()
         model.fit(X, y)
         return model
 
-    n_splits = 5 if y.size >= 10 else max(2, y.size // 2)
-    cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    # determine valid n_splits from stratification labels
+    _, counts = np.unique(strat_labels, return_counts=True)
+    max_splits = counts.min()
+    n_splits = min(5, max_splits)
+    if n_splits < 2:
+        raise ValueError("Not enough samples per class for stratified CV.")
+
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
     base_model = _build_gru_regressor()
-    # Refined search space using the observed ranking:
-    # the best region was around lr=1e-3, bidirectional=True, hidden_size=64, num_layers=1.
     param_grid = {
         "lr": [1e-3, 7e-4],
         "module__bidirectional": [True],
@@ -137,7 +141,7 @@ def _fit_gru_with_grid_search(X, y, save_folder, reg_path):
         estimator=base_model,
         param_grid=param_grid,
         scoring=scoring,
-        cv=cv,
+        cv=cv.split(X, strat_labels),
         refit=True,
         n_jobs=1,
         verbose=2,
@@ -178,9 +182,9 @@ def train_regressor(
     window_size=None,
     decimation_factor=None,
 ):
-    best_estimators_df = pd.read_csv(save_folder + 'best_estimators_results.csv', index_col=0).sort_values(by=['mean_test_score', 'std_test_score'], ascending=False)
-
-    # Caricamento dei classificatori
+    best_estimators_df = pd.read_csv(
+        save_folder + "best_estimators_results.csv", index_col=0
+    ).sort_values(by=["mean_test_score", "std_test_score"], ascending=False)
 
     estimators_specs_list, estimators_list = build_estimators_list(
         best_estimators_df=best_estimators_df,
@@ -190,14 +194,12 @@ def train_regressor(
         decimation_factor=decimation_factor,
     )
 
-    reg_path = 'regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
-    os.makedirs(save_folder + 'Regressors/', exist_ok = True)
-    reg_full_path = save_folder + 'Regressors/' + reg_path
+    reg_path = "regressor_" + regressor_hash_from_estimators_specs(estimators_specs_list)
+    os.makedirs(save_folder + "Regressors/", exist_ok=True)
+    reg_full_path = save_folder + "Regressors/" + reg_path
     if os.path.exists(reg_full_path):
         print("REGRESSOR: already trained ->", reg_full_path)
         return
-
-    # Allenamento del regressore
 
     sequence_list = []
     y_targets = []
@@ -218,5 +220,7 @@ def train_regressor(
     X = stack_regressor_sequences(sequence_list)
     y = np.asarray(y_targets, dtype=np.float32)
 
-    model = _fit_gru_with_grid_search(X, y, save_folder, reg_path)
+    strat_labels = (metadata["AHA"].to_numpy() == 100).astype(int)
+
+    model = _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path)
     jl.dump(model, reg_full_path)
