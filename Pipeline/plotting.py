@@ -93,12 +93,12 @@ def plot_dashboards(
             subject_metadata,
         )
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
-        enmo_D, enmo_ND = read_file  (data_folder,
+        mag_D, mag_ND = read_file  (data_folder,
                                                 subject,
                                                 window_size,
                                                 decimation_factor,
                                                 input_type='week',
-                                                return_enmo=1
+                                                return_mag=1
                                                )
         healthy_percentage.append(hp_tot_list)
         real_aha = subject_metadata['AHA']
@@ -117,8 +117,8 @@ def plot_dashboards(
         plt.grid()
         ax = plt.gca()
         ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.plot(timestamps, enmo_D)
-        plt.plot(timestamps, enmo_ND)
+        plt.plot(timestamps, mag_D)
+        plt.plot(timestamps, mag_ND)
         plt.xlabel("Orario")
         plt.ylabel("Magnitudo")
         plt.gcf().set_size_inches(8, 2)
@@ -134,14 +134,14 @@ def plot_dashboards(
             #axs[0].xaxis.set_minor_locator(matplotlib.ticker.AutoMinorLocator(n=6))
             #axs[0].xaxis.set_minor_formatter(matplotlib.dates.DateFormatter('%H-%M'))
         #axs[0].xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%d-%H:%M'))
-        #axs[0].plot(timestamps, enmo_D)
-        #axs[0].plot(timestamps, enmo_ND)
+        #axs[0].plot(timestamps, mag_D)
+        #axs[0].plot(timestamps, mag_ND)
 
 
         ########################## AI PLOT ##########################
         ai_list = []
-        subList_magD = [enmo_D[n:n+block_samples] for n in range(0, len(enmo_D), block_samples)]
-        subList_magND = [enmo_ND[n:n+block_samples] for n in range(0, len(enmo_ND), block_samples)]
+        subList_magD = [mag_D[n:n+block_samples] for n in range(0, len(mag_D), block_samples)]
+        subList_magND = [mag_ND[n:n+block_samples] for n in range(0, len(mag_ND), block_samples)]
         for l in range(len(subList_magD)):
             if (subList_magD[l].mean() + subList_magND[l].mean()) == 0:
                 ai_list.append(np.nan)
