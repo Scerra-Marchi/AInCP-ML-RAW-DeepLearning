@@ -14,10 +14,6 @@ import pandas as pd
 
 import random
 import torch
-from torch import nn
-from skorch import NeuralNetBinaryClassifier
-from skorch.callbacks import EarlyStopping
-from skorch.dataset import ValidSplit
 from skorch_models import (
     Conv1DSequenceClassifier,
     GRUSequenceClassifier,
@@ -25,6 +21,7 @@ from skorch_models import (
     RNNSequenceClassifier,
     ReservoirSequenceClassifier,
     TransformerSequenceClassifier,
+    make_bce_net,
 )
 from ray.tune import TuneConfig
 
@@ -48,40 +45,6 @@ def _hash_param_grid(param_grid: dict) -> str:
     # Create a stable short hash for a parameter grid so different grids get different output folders.
     payload = json.dumps(param_grid, sort_keys=True, default=str).encode()
     return hashlib.sha256(payload).hexdigest()[:10]
-
-
-def _make_bce_net(module, pos_weight_value: float):
-    # Build a fresh skorch estimator each time to avoid shared mutable state across trials.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    pos_weight = torch.tensor(pos_weight_value, dtype=torch.float32, device=device)
-    net = NeuralNetBinaryClassifier(
-        module=module,
-        callbacks=[
-            (
-                "early_stopping",
-                EarlyStopping(
-                    monitor="valid_loss",
-                    patience=25,
-                    threshold=1e-4,
-                    threshold_mode="rel",
-                    lower_is_better=True,
-                    load_best=True,
-                ),
-            )
-        ],
-        criterion=nn.BCEWithLogitsLoss,
-        criterion__pos_weight=pos_weight,
-        max_epochs=200,
-        lr=1e-3,
-        batch_size=64,
-        optimizer=torch.optim.AdamW,
-        iterator_train__shuffle=True,
-        train_split=ValidSplit(0.2, stratified=True, random_state=42),
-        device=device,
-        verbose=0,
-    )
-    net.threshold = 0.5
-    return net
 
 
 def train_select_classifiers(
@@ -111,6 +74,9 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.0, 1e-4],
                 "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
                 "module__hidden_size": [32, 64],
                 "module__num_layers": [1, 2],
                 "module__dropout": [0.0, 0.2],
@@ -122,6 +88,9 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.0, 1e-4],
                 "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
                 "module__hidden_size": [32, 64],
                 "module__num_layers": [1, 2],
                 "module__dropout": [0.0, 0.2],
@@ -133,6 +102,9 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.0, 1e-4],
                 "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
                 "module__hidden_size": [32, 64],
                 "module__num_layers": [1, 2],
                 "module__dropout": [0.0, 0.2],
@@ -145,6 +117,9 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.0, 1e-4],
                 "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
                 "module__channels": [16, 32, 64],
                 "module__kernel_size": [5, 7],
                 "module__dropout": [0.0, 0.3],
@@ -157,7 +132,9 @@ def train_select_classifiers(
                 {
                     "optimizer__weight_decay": [1e-4],
                     "lr": [3e-4, 1e-3],
-                    "batch_size": [16, 32],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
                     "module__d_model": [32],
                     "module__nhead": [4, 8],
                     "module__num_layers": [2, 3],
@@ -168,7 +145,9 @@ def train_select_classifiers(
                 {
                     "optimizer__weight_decay": [1e-4],
                     "lr": [3e-4, 1e-3],
-                    "batch_size": [16, 32],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
                     "module__d_model": [64],
                     "module__nhead": [8],
                     "module__num_layers": [2, 3],
@@ -183,6 +162,9 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.0],
                 "lr": [1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
                 "module__reservoir_size": [200, 400],
                 "module__spectral_radius": [0.8, 0.9, 1.0],
                 "module__leak_rate": [1.0],
@@ -274,7 +256,7 @@ def train_select_classifiers(
         from train_best_model import train_best_model
 
         module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
-        estimator = _make_bce_net(module, pos_weight_value)
+        estimator = make_bce_net(module, pos_weight_value)
 
         train_best_model(
             data_folder=data_folder,
