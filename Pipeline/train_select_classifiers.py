@@ -62,11 +62,6 @@ def train_select_classifiers(
     # 3) train missing combinations (trials early-exit when artifacts already exist),
     # 4) load and aggregate cv_results.csv across the selected grid.
 
-    # Class-1 must represent healthy samples (AHA == 100).
-    labels = torch.as_tensor((metadata["AHA"].to_numpy() == 100).astype("int64"), dtype=torch.long)
-    counts = torch.bincount(labels, minlength=2)
-    pos_weight_value = float((counts[0] / counts[1]).item())
-
     # NOTE: only lightweight, picklable fields are kept in specs (no estimator objects).
     gridsearch_specs_list = [
         {
@@ -226,7 +221,6 @@ def train_select_classifiers(
         metadata,
         gridsearch_specs_list,
         model_name_to_idx,
-        pos_weight_value,
     ):
         # Ray Tune trainable: receives one point in the Cartesian product.
         # Ensure local imports and relative paths resolve consistently inside the worker process.
@@ -256,7 +250,7 @@ def train_select_classifiers(
         from train_best_model import train_best_model
 
         module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
-        estimator = make_bce_net(module, pos_weight_value)
+        estimator = make_bce_net(module)
 
         train_best_model(
             data_folder=data_folder,
@@ -283,7 +277,6 @@ def train_select_classifiers(
         metadata=metadata,
         gridsearch_specs_list=gridsearch_specs_list,
         model_name_to_idx=model_name_to_idx,
-        pos_weight_value=pos_weight_value,
     )
 
     param_space = {
