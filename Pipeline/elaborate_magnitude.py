@@ -6,7 +6,7 @@ def elaborate_magnitude(operation_type, D, ND):
     """
 
     # Magnitude (lazy: solo se serve)
-    if operation_type in ('concat', 'difference', 'ai', 'enmo'):
+    if operation_type in ('concat', 'difference', 'ai', 'magnitude', 'enmo'):
         mag_D = np.linalg.norm(D, axis=2)
         mag_ND = np.linalg.norm(ND, axis=2)
 
@@ -27,6 +27,11 @@ def elaborate_magnitude(operation_type, D, ND):
             out=out
         )
         return out * 100
+
+    # ===== MAGNITUDE =====
+    elif operation_type == 'magnitude':
+        return np.stack((mag_D, mag_ND), axis=2)
+        # shape: (n_windows, WINDOW_SIZE, 2)
 
     # ===== ENMO =====
     elif operation_type == 'enmo':
