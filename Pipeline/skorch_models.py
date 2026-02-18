@@ -14,10 +14,9 @@ from skorch.callbacks import EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
 
 
-def make_bce_net(module, pos_weight_value: float):
+def make_bce_net(module):
     # Build a fresh skorch estimator each time to avoid shared mutable state across trials.
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    pos_weight = torch.tensor(pos_weight_value, dtype=torch.float32, device=device)
     net = NeuralNetBinaryClassifier(
         module=module,
         callbacks=[
@@ -51,7 +50,6 @@ def make_bce_net(module, pos_weight_value: float):
             )
         ],
         criterion=nn.BCEWithLogitsLoss,
-        criterion__pos_weight=pos_weight,
         optimizer=torch.optim.AdamW,
         iterator_train__shuffle=True,
         train_split=ValidSplit(0.2, stratified=True, random_state=42),
