@@ -1,12 +1,14 @@
 import hashlib
 import json
+import os
+
 import numpy as np
 import joblib as jl
 import pandas as pd
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
+
 from predict_samples import build_estimators_list, predict_samples
 from skorch_models import make_gru_regressor_net, save_best_estimator_plots
-import os
 
 REGRESSOR_PARAM_GRID = {
     "lr": [1e-3, 7e-4],
@@ -22,6 +24,7 @@ REGRESSOR_PARAM_GRID = {
 
 
 def regressor_hash_from_estimators(estimators_list, param_grid) -> str:
+    """Build a stable short hash from classifier identities and regressor search space."""
     classifier_paths = sorted(
         os.path.normpath(os.path.join(str(es["estimator_dir"]), "best_estimator.joblib"))
         for es in estimators_list
@@ -36,11 +39,13 @@ def regressor_hash_from_estimators(estimators_list, param_grid) -> str:
 
 
 def regressor_model_path(save_folder, estimators_list, param_grid):
+    """Return the regressor model artifact path for the current classifier set + param grid."""
     reg_hash = regressor_hash_from_estimators(estimators_list, param_grid)
     return os.path.join(save_folder, "Regressors", f"regressor_{reg_hash}", "regressor.joblib")
 
 
 def build_regressor_sequence(predictions_list, invalid_bitmap):
+    """Create per-subject sequence features: estimator probs + invalid bit + normalized time."""
     n_windows = np.asarray(predictions_list[0]).size
     invalid = np.asarray(invalid_bitmap, dtype=np.uint8).reshape(-1)
 
@@ -54,7 +59,7 @@ def build_regressor_sequence(predictions_list, invalid_bitmap):
 
 
 def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
-    
+    """Run 5-fold stratified grid search, save CSV/plots, and return the best estimator."""
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     grid = GridSearchCV(
@@ -71,10 +76,12 @@ def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     print("REGRESSOR: best_score_ =", float(grid.best_score_))
     print("REGRESSOR: best_params_ =", grid.best_params_)
 
+    # Persist full CV table for later inspection/comparison.
     os.makedirs(reg_dir, exist_ok=True)
     cv_results_path = os.path.join(reg_dir, "gridsearch_results.csv")
 
     pd.DataFrame(grid.cv_results_).sort_values(by="rank_test_score").to_csv(cv_results_path, index=False)
+    # Save train/validation loss curves of the refit best estimator.
     save_best_estimator_plots(
         grid.best_estimator_,
         reg_dir,
@@ -92,6 +99,8 @@ def train_regressor(
     window_size=None,
     decimation_factor=None,
 ):
+    """Train (or reuse) the hash-addressed regressor built on selected classifier outputs."""
+    # Select and load classifiers used to generate regressor inputs.
     best_estimators_df = pd.read_csv(
         save_folder + "best_estimators_results.csv", index_col=0
     )
@@ -104,6 +113,7 @@ def train_regressor(
         decimation_factor=decimation_factor,
     )
 
+    # Hash-based destination: same classifiers + grid -> same regressor path.
     reg_model_path = regressor_model_path(
         save_folder=save_folder,
         estimators_list=estimators_list,
@@ -115,6 +125,7 @@ def train_regressor(
         print("REGRESSOR: already trained ->", reg_model_path)
         return
 
+    # Build one sequence per subject from estimator probabilities.
     sequence_list = []
     for _, subject_metadata in metadata.iterrows():
         print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'BEGIN')
@@ -126,6 +137,7 @@ def train_regressor(
         sequence_list.append(build_regressor_sequence(estimator_probs_list, invalid_bitmap))
         print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'END')
 
+    # Assemble training tensors and stratification labels.
     X = np.stack(sequence_list).astype(np.float32)
     y = metadata["AHA"].to_numpy(dtype=np.float32)
     strat_labels = (y == 100).astype(int)
