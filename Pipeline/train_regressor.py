@@ -5,7 +5,7 @@ import joblib as jl
 import pandas as pd
 from sklearn.model_selection import GridSearchCV, ParameterGrid, StratifiedKFold
 from predict_samples import build_estimators_list, predict_samples
-from skorch_models import make_gru_regressor_net
+from skorch_models import make_gru_regressor_net, save_best_estimator_plots
 import os
 import sys
 
@@ -18,6 +18,7 @@ REGRESSOR_PARAM_GRID = {
     "module__num_layers": [1, 2],
     "module__dropout": [0.0, 0.1],
     "optimizer__weight_decay": [0.0, 1e-4],
+    "callbacks__early_stopping__patience": [25],
 }
 
 
@@ -99,7 +100,11 @@ def _first_grid_point(param_grid):
 def _fit_gru_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     if y.size < 2:
         model = make_gru_regressor_net()
-        model.set_params(**_first_grid_point(param_grid))
+        first_point = _first_grid_point(param_grid)
+        no_callback_params = {
+            k: v for k, v in first_point.items() if not k.startswith("callbacks__")
+        }
+        model.set_params(callbacks=[], train_split=False, **no_callback_params)
         model.fit(X, y)
         return model
 
@@ -153,6 +158,11 @@ def _fit_gru_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
             indent=4,
             default=str,
         )
+    save_best_estimator_plots(
+        grid.best_estimator_,
+        reg_dir,
+        loss_label="MSELoss",
+    )
 
     return grid.best_estimator_
 

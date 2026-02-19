@@ -3,47 +3,11 @@ import json
 import pandas as pd
 import numpy as np
 import joblib as jl
-import matplotlib.pyplot as plt
 import torch
 from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
-
-
-def _plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path):
-    fig, ax = plt.subplots()
-    ax.plot(x, history_df[train_col], label=train_col)
-    ax.plot(x, history_df[valid_col], label=valid_col)
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(save_path)
-    plt.close(fig)
-
-
-def _save_best_estimator_plots(estimator, stats_folder):
-    history_df = pd.DataFrame(estimator.history.to_list())
-    x = history_df["epoch"]
-    _plot_train_valid(
-        history_df,
-        x,
-        "train_loss",
-        "valid_loss",
-        "BCEWithLogitsLoss",
-        "Loss During Training",
-        os.path.join(stats_folder, "best_estimator_loss.png"),
-    )
-    _plot_train_valid(
-        history_df,
-        x,
-        "train_f1",
-        "valid_f1",
-        "F1 Macro",
-        "F1 Macro During Training",
-        os.path.join(stats_folder, "best_estimator_f1.png"),
-    )
+from skorch_models import save_best_estimator_plots
 
 
 def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
@@ -82,7 +46,7 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
     stats_folder = gridsearch_folder + 'GridSearchCV_stats/'
     os.makedirs(stats_folder, exist_ok = True)
     pd.DataFrame(parameter_tuning_method.cv_results_).to_csv(stats_folder + "cv_results.csv")
-    _save_best_estimator_plots(estimator, stats_folder)
+    save_best_estimator_plots(estimator, stats_folder, loss_label="BCEWithLogitsLoss")
     
     with open(stats_folder + 'best_estimator_stats.json', 'w') as f:
         f.write(

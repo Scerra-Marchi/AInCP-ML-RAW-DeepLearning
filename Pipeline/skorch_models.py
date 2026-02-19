@@ -6,12 +6,55 @@ Changes in this file are not included in grid-search hashes.
 
 from __future__ import annotations
 
+import os
 import torch
 import torch.nn.functional as F
 from torch import nn
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
+
+
+def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path):
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    ax.plot(x, history_df[train_col], label=train_col)
+    ax.plot(x, history_df[valid_col], label=valid_col)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(save_path)
+    plt.close(fig)
+
+
+def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
+    import pandas as pd
+
+    history_df = pd.DataFrame(estimator.history.to_list())
+    x = history_df["epoch"]
+    if {"train_loss", "valid_loss"}.issubset(history_df.columns):
+        plot_train_valid(
+            history_df,
+            x,
+            "train_loss",
+            "valid_loss",
+            loss_label,
+            "Loss During Training",
+            os.path.join(stats_folder, "best_estimator_loss.png"),
+        )
+    if {"train_f1", "valid_f1"}.issubset(history_df.columns):
+        plot_train_valid(
+            history_df,
+            x,
+            "train_f1",
+            "valid_f1",
+            "F1 Macro",
+            "F1 Macro During Training",
+            os.path.join(stats_folder, "best_estimator_f1.png"),
+        )
 
 
 def make_bce_net(module):
@@ -65,10 +108,22 @@ def make_gru_regressor_net():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return NeuralNetRegressor(
         module=GRUSequenceClassifier,
+        callbacks=[
+            (
+                "early_stopping",
+                EarlyStopping(
+                    monitor="valid_loss",
+                    threshold=1e-4,
+                    threshold_mode="rel",
+                    lower_is_better=True,
+                    load_best=True,
+                ),
+            ),
+        ],
         criterion=nn.MSELoss,
         optimizer=torch.optim.AdamW,
         iterator_train__shuffle=True,
-        train_split=False,
+        train_split=ValidSplit(0.2, random_state=42),
         device=device,
         verbose=0,
     )
