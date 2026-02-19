@@ -3,37 +3,38 @@ import json
 import numpy as np
 import joblib as jl
 import pandas as pd
-import torch
-from torch import nn
-from skorch import NeuralNetRegressor
 from sklearn.model_selection import GridSearchCV, ParameterGrid, StratifiedKFold
 from predict_samples import build_estimators_list, predict_samples
-from skorch_models import GRUSequenceClassifier
+from skorch_models import make_gru_regressor_net
 import os
 import sys
 
-REGRESSOR_SCHEMA_VERSION = "gru_seq_v3_grid5_refined"
+REGRESSOR_PARAM_GRID = {
+    "lr": [1e-3, 7e-4],
+    "max_epochs": [160],
+    "batch_size": [16],
+    "module__bidirectional": [True],
+    "module__hidden_size": [48, 64, 80],
+    "module__num_layers": [1, 2],
+    "module__dropout": [0.0, 0.1],
+    "optimizer__weight_decay": [0.0, 1e-4],
+}
 
 
-def regressor_hash_from_estimators_specs(estimators_specs_list) -> str:
-    specs = sorted(
+def regressor_hash_from_estimators(estimators_list, param_grid) -> str:
+    classifier_paths = sorted(
         [
-            (
-                str(r["method"]),
-                int(r["window_size"]),
-                int(r["decimation_factor"]),
-                str(r["model_type"]).split(".")[-1],
-                str(r["gridsearch_hash"]),
-            )
-            for r in estimators_specs_list
+            os.path.normpath(os.path.join(str(es["estimator_dir"]), "best_estimator.joblib"))
+            for es in estimators_list
         ]
     )
     payload = {
-        "schema_version": REGRESSOR_SCHEMA_VERSION,
-        "features": ["best_estimators_probs", "invalid_bit", "timestamp_norm"],
-        "specs": specs,
+        "classifiers": classifier_paths,
+        "regressor_param_grid": param_grid,
     }
-    return hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()[:10]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()[:10]
 
 
 def build_regressor_sequence(predictions_list, invalid_bitmap):
@@ -85,30 +86,14 @@ def stack_regressor_sequences(sequence_list):
     return np.stack([seq[:min_len] for seq in sequence_list]).astype(np.float32)
 
 
-def _build_gru_regressor():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    return NeuralNetRegressor(
-        module=GRUSequenceClassifier,
-        criterion=nn.MSELoss,
-        max_epochs=160,
-        lr=1e-3,
-        batch_size=16,
-        optimizer=torch.optim.AdamW,
-        optimizer__weight_decay=0.0,
-        iterator_train__shuffle=True,
-        train_split=False,
-        module__hidden_size=64,
-        module__num_layers=1,
-        module__dropout=0.1,
-        module__bidirectional=True,
-        device=device,
-        verbose=0,
-    )
+def _first_grid_point(param_grid):
+    return next(iter(ParameterGrid(param_grid)))
 
 
-def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path):
+def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path, param_grid):
     if y.size < 2:
-        model = _build_gru_regressor()
+        model = make_gru_regressor_net()
+        model.set_params(**_first_grid_point(param_grid))
         model.fit(X, y)
         return model
 
@@ -121,15 +106,7 @@ def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path):
 
     cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    base_model = _build_gru_regressor()
-    param_grid = {
-        "lr": [1e-3, 7e-4],
-        "module__bidirectional": [True],
-        "module__hidden_size": [48, 64, 80],
-        "module__num_layers": [1, 2],
-        "module__dropout": [0.0, 0.1],
-        "optimizer__weight_decay": [0.0, 1e-4],
-    }
+    base_model = make_gru_regressor_net()
 
     n_candidates = len(list(ParameterGrid(param_grid)))
     scoring = "r2" if y.size >= 10 else "neg_mean_absolute_error"
@@ -163,6 +140,7 @@ def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path):
                 "scoring": scoring,
                 "best_score": float(grid.best_score_),
                 "best_params": grid.best_params_,
+                "param_grid": param_grid,
                 "cv_splits": n_splits,
                 "candidates": n_candidates,
             },
@@ -194,7 +172,10 @@ def train_regressor(
         decimation_factor=decimation_factor,
     )
 
-    reg_path = "regressor_" + regressor_hash_from_estimators_specs(estimators_specs_list)
+    reg_path = "regressor_" + regressor_hash_from_estimators(
+        estimators_list=estimators_list,
+        param_grid=REGRESSOR_PARAM_GRID,
+    )
     os.makedirs(save_folder + "Regressors/", exist_ok=True)
     reg_full_path = save_folder + "Regressors/" + reg_path
     if os.path.exists(reg_full_path):
@@ -222,5 +203,12 @@ def train_regressor(
 
     strat_labels = (metadata["AHA"].to_numpy() == 100).astype(int)
 
-    model = _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path)
+    model = _fit_gru_with_grid_search(
+        X,
+        y,
+        strat_labels,
+        save_folder,
+        reg_path,
+        REGRESSOR_PARAM_GRID,
+    )
     jl.dump(model, reg_full_path)

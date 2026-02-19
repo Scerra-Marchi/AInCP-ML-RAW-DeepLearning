@@ -8,7 +8,11 @@ from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
 import math
-from train_regressor import regressor_hash_from_estimators_specs, build_regressor_sequence
+from train_regressor import (
+    REGRESSOR_PARAM_GRID,
+    regressor_hash_from_estimators,
+    build_regressor_sequence,
+)
 from read_file import read_file
 
 
@@ -61,7 +65,10 @@ def plot_dashboards(
     
     print('Expected estimators: ',len(estimators_specs_list))
 
-    reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
+    reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators(
+        estimators_list=estimators_list,
+        param_grid=REGRESSOR_PARAM_GRID,
+    )
     regressor = jl.load(reg_path)
 
     os.makedirs(stats_folder, exist_ok=True)

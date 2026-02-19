@@ -9,7 +9,7 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from torch import nn
-from skorch import NeuralNetBinaryClassifier
+from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
 
@@ -58,6 +58,20 @@ def make_bce_net(module):
     )
     net.threshold = 0.5
     return net
+
+
+def make_gru_regressor_net():
+    # Build a fresh skorch regressor; variable hyperparameters are set by train_regressor.py grid search.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return NeuralNetRegressor(
+        module=GRUSequenceClassifier,
+        criterion=nn.MSELoss,
+        optimizer=torch.optim.AdamW,
+        iterator_train__shuffle=True,
+        train_split=False,
+        device=device,
+        verbose=0,
+    )
 
 
 class LSTMSequenceClassifier(nn.Module):
