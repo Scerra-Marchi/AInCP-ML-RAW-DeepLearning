@@ -37,6 +37,12 @@ def regressor_hash_from_estimators(estimators_list, param_grid) -> str:
     ).hexdigest()[:10]
 
 
+def regressor_model_path(save_folder, estimators_list, param_grid):
+    reg_hash = regressor_hash_from_estimators(estimators_list, param_grid)
+    reg_name = f"regressor_{reg_hash}"
+    return os.path.join(save_folder, "Regressors", reg_name, "regressor.joblib")
+
+
 def build_regressor_sequence(predictions_list, invalid_bitmap):
     if not predictions_list:
         raise ValueError("No estimator predictions were provided to build GRU regressor inputs.")
@@ -90,7 +96,7 @@ def _first_grid_point(param_grid):
     return next(iter(ParameterGrid(param_grid)))
 
 
-def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path, param_grid):
+def _fit_gru_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     if y.size < 2:
         model = make_gru_regressor_net()
         model.set_params(**_first_grid_point(param_grid))
@@ -128,10 +134,9 @@ def _fit_gru_with_grid_search(X, y, strat_labels, save_folder, reg_path, param_g
     print("REGRESSOR: best_score_ =", float(grid.best_score_))
     print("REGRESSOR: best_params_ =", grid.best_params_)
 
-    reg_dir = os.path.join(save_folder, "Regressors")
     os.makedirs(reg_dir, exist_ok=True)
-    cv_results_path = os.path.join(reg_dir, f"{reg_path}_gridsearch_results.csv")
-    best_params_path = os.path.join(reg_dir, f"{reg_path}_gridsearch_best.json")
+    cv_results_path = os.path.join(reg_dir, "gridsearch_results.csv")
+    best_params_path = os.path.join(reg_dir, "gridsearch_best.json")
 
     pd.DataFrame(grid.cv_results_).sort_values(by="rank_test_score").to_csv(cv_results_path, index=False)
     with open(best_params_path, "w") as f:
@@ -172,14 +177,15 @@ def train_regressor(
         decimation_factor=decimation_factor,
     )
 
-    reg_path = "regressor_" + regressor_hash_from_estimators(
+    reg_model_path = regressor_model_path(
+        save_folder=save_folder,
         estimators_list=estimators_list,
         param_grid=REGRESSOR_PARAM_GRID,
     )
-    os.makedirs(save_folder + "Regressors/", exist_ok=True)
-    reg_full_path = save_folder + "Regressors/" + reg_path
-    if os.path.exists(reg_full_path):
-        print("REGRESSOR: already trained ->", reg_full_path)
+    reg_dir = os.path.dirname(reg_model_path)
+    os.makedirs(os.path.join(save_folder, "Regressors"), exist_ok=True)
+    if os.path.exists(reg_model_path):
+        print("REGRESSOR: already trained ->", reg_model_path)
         return
 
     sequence_list = []
@@ -207,8 +213,8 @@ def train_regressor(
         X,
         y,
         strat_labels,
-        save_folder,
-        reg_path,
+        reg_dir,
         REGRESSOR_PARAM_GRID,
     )
-    jl.dump(model, reg_full_path)
+    os.makedirs(reg_dir, exist_ok=True)
+    jl.dump(model, reg_model_path)

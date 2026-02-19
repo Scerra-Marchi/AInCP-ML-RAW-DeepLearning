@@ -5,7 +5,7 @@ import joblib as jl
 from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
 from train_regressor import (
-    regressor_hash_from_estimators,
+    regressor_model_path,
     REGRESSOR_PARAM_GRID,
     build_regressor_sequence,
     stack_regressor_sequences,
@@ -66,16 +66,16 @@ def test_classifier_regressor(
         "Correlation Coefficient": np.corrcoef(np.array(hp_tot_list_list)[:, 0], y)[0, 1]
     }
 
-    reg_path = 'regressor_' + regressor_hash_from_estimators(
+    model_path = regressor_model_path(
+        save_folder=save_folder,
         estimators_list=estimators_list,
         param_grid=REGRESSOR_PARAM_GRID,
     )
-    #regressor = BaseEstimator().load_from_path(save_folder + 'Regressors/' + reg_path)
-    regressor = jl.load(save_folder + 'Regressors/' + reg_path)
+    regressor = jl.load(model_path)
     y_pred = np.asarray(regressor.predict(X_seq), dtype=float)
 
     data_regression = {
-        "Regressor path": reg_path,
+        "Regressor path": model_path,
         "R2 Score": r2_score(y, y_pred),
         "Classifiers Used": model_params_list
     }

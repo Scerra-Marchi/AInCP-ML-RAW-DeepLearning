@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import math
 from train_regressor import (
     REGRESSOR_PARAM_GRID,
-    regressor_hash_from_estimators,
+    regressor_model_path,
     build_regressor_sequence,
 )
 from read_file import read_file
@@ -65,11 +65,12 @@ def plot_dashboards(
     
     print('Expected estimators: ',len(estimators_specs_list))
 
-    reg_path = save_folder + 'Regressors/regressor_' + regressor_hash_from_estimators(
+    model_path = regressor_model_path(
+        save_folder=save_folder,
         estimators_list=estimators_list,
         param_grid=REGRESSOR_PARAM_GRID,
     )
-    regressor = jl.load(reg_path)
+    regressor = jl.load(model_path)
 
     os.makedirs(stats_folder, exist_ok=True)
     timestamps = jl.load(timestamps_file)     # Si carica la lista dei timestamps
