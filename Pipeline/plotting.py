@@ -8,11 +8,7 @@ from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
 import math
-from train_regressor import (
-    REGRESSOR_PARAM_GRID,
-    regressor_model_path,
-    build_regressor_sequence,
-)
+from train_regressor import regressor_model_path, build_regressor_sequence
 from read_file import read_file
 
 
@@ -68,7 +64,6 @@ def plot_dashboards(
     model_path = regressor_model_path(
         save_folder=save_folder,
         estimators_list=estimators_list,
-        param_grid=REGRESSOR_PARAM_GRID,
     )
     regressor = jl.load(model_path)
 

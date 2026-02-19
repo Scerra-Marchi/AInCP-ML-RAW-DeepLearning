@@ -4,12 +4,7 @@ import pandas as pd
 import joblib as jl
 from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
-from train_regressor import (
-    regressor_model_path,
-    REGRESSOR_PARAM_GRID,
-    build_regressor_sequence,
-    stack_regressor_sequences,
-)
+from train_regressor import regressor_model_path, build_regressor_sequence
 
 def test_classifier_regressor(
     data_folder,
@@ -54,7 +49,7 @@ def test_classifier_regressor(
     #    x.append(hp_tot[0])
     #    y.append(subject_metadata['AHA'])
 
-    X_seq = stack_regressor_sequences(sequence_list)
+    X_seq = np.stack(sequence_list).astype(np.float32)
     y = np.array(metadata['AHA'].values)
 
     # Organizing data into a dictionary
@@ -69,7 +64,6 @@ def test_classifier_regressor(
     model_path = regressor_model_path(
         save_folder=save_folder,
         estimators_list=estimators_list,
-        param_grid=REGRESSOR_PARAM_GRID,
     )
     regressor = jl.load(model_path)
     y_pred = np.asarray(regressor.predict(X_seq), dtype=float)

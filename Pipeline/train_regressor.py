@@ -23,24 +23,19 @@ REGRESSOR_PARAM_GRID = {
 }
 
 
-def regressor_hash_from_estimators(estimators_list, param_grid) -> str:
-    """Build a stable short hash from classifier identities and regressor search space."""
+def regressor_model_path(save_folder, estimators_list):
+    """Return the hash-addressed regressor model path for the current classifier set."""
     classifier_paths = sorted(
         os.path.normpath(os.path.join(str(es["estimator_dir"]), "best_estimator.joblib"))
         for es in estimators_list
     )
     payload = {
         "classifiers": classifier_paths,
-        "regressor_param_grid": param_grid,
+        "regressor_param_grid": REGRESSOR_PARAM_GRID,
     }
-    return hashlib.sha256(
+    reg_hash = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()[:10]
-
-
-def regressor_model_path(save_folder, estimators_list, param_grid):
-    """Return the regressor model artifact path for the current classifier set + param grid."""
-    reg_hash = regressor_hash_from_estimators(estimators_list, param_grid)
     return os.path.join(save_folder, "Regressors", f"regressor_{reg_hash}", "regressor.joblib")
 
 
@@ -117,7 +112,6 @@ def train_regressor(
     reg_model_path = regressor_model_path(
         save_folder=save_folder,
         estimators_list=estimators_list,
-        param_grid=REGRESSOR_PARAM_GRID,
     )
     reg_dir = os.path.dirname(reg_model_path)
     os.makedirs(reg_dir, exist_ok=True)
