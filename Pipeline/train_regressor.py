@@ -39,18 +39,36 @@ def regressor_model_path(save_folder, estimators_list):
     return os.path.join(save_folder, "Regressors", f"regressor_{reg_hash}", "regressor.joblib")
 
 
-def build_regressor_sequence(predictions_list, invalid_bitmap):
-    """Create per-subject sequence features: estimator probs + invalid bit + normalized time."""
+def build_regressor_sequence(predictions_list, invalid_bitmap, window_size, fs=80):
+    """
+    Create per-subject sequence features:
+    estimator probs + invalid bit + cyclic time-of-day (sin, cos)
+    """
     n_windows = np.asarray(predictions_list[0]).size
     invalid = np.asarray(invalid_bitmap, dtype=np.uint8).reshape(-1)
 
-    probs_matrix = np.column_stack([np.asarray(pred, dtype=np.float32) for pred in predictions_list])
+    probs_matrix = np.column_stack([
+        np.asarray(pred, dtype=np.float32) for pred in predictions_list
+    ])
     invalid_col = invalid.astype(np.float32).reshape(-1, 1)
 
-    denom = np.float32(max(n_windows - 1, 1))
-    timestamp_col = np.arange(n_windows, dtype=np.float32).reshape(-1, 1) / denom
+    # ---- TIME COMPUTATION ----
+    # seconds per window
+    seconds_per_window = window_size / fs
 
-    return np.hstack((probs_matrix, invalid_col, timestamp_col)).astype(np.float32)
+    # absolute time in seconds from file start
+    t_abs = np.arange(n_windows, dtype=np.float32) * seconds_per_window
+
+    # seconds within the day (cyclic)
+    seconds_in_day = 24 * 60 * 60
+    t_day = np.mod(t_abs, seconds_in_day)
+
+    # cyclic encoding
+    angle = 2 * np.pi * t_day / seconds_in_day
+    time_sin = np.sin(angle).reshape(-1, 1)
+    time_cos = np.cos(angle).reshape(-1, 1)
+
+    return np.hstack((probs_matrix, invalid_col, time_sin, time_cos)).astype(np.float32)
 
 
 def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
@@ -128,7 +146,12 @@ def train_regressor(
             estimators_list,
             subject_metadata,
         )
-        sequence_list.append(build_regressor_sequence(estimator_probs_list, invalid_bitmap))
+        
+        sequence_list.append(build_regressor_sequence(
+                            estimator_probs_list,
+                            invalid_bitmap,
+                            window_size=window_size))
+        
         print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'END')
 
     # Assemble training tensors and stratification labels.
