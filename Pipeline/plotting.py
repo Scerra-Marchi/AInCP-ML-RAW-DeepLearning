@@ -1,5 +1,6 @@
 import os
 import json
+import warnings
 import pandas as pd
 from itertools import product
 import joblib as jl
@@ -12,7 +13,23 @@ from train_regressor import regressor_model_path, build_regressor_sequence
 from read_file import read_file
 
 import torch
-from captum.attr import IntegratedGradients
+import shap
+
+
+class _RegressorShapWrapper(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x):
+        out = self.model(x)
+        return out.unsqueeze(-1) if out.ndim == 1 else out
+
+
+def _build_feature_names(n_features, n_estimators):
+    names = [f"classifier_{i}" for i in range(n_estimators)]
+    names += ["invalid_flag", "time_sin", "time_cos"]
+    return names[:n_features]
 
 
 def create_timestamps_list(data_folder):
@@ -59,24 +76,15 @@ def plot_dashboards(
     )
     regressor = jl.load(model_path)
 
-    # --- Captum setup ---
+    # --- SHAP setup ---
     net = regressor.module_
-
-    # riattivo gradienti
+    shap_model = _RegressorShapWrapper(net)
     torch.set_grad_enabled(True)
+    net.eval()
+    device = next(net.parameters()).device
 
-    # forza training mode DOPO predict()
-    net.train()
-
-    # disabilito dropout
-    for m in net.modules():
-        if isinstance(m, torch.nn.Dropout):
-            m.p = 0.0
-
-    # DISABILITA CUDNN PER RNN 
+    # DISABILITA CUDNN PER RNN
     torch.backends.cudnn.enabled = False
-
-    ig = IntegratedGradients(net)
 
     timestamps = jl.load(timestamps_file)
 
@@ -127,53 +135,77 @@ def plot_dashboards(
 
         #################### EXPLAINABILITY ####################
 
-        torch.set_grad_enabled(True)
-        net.train()
-
-        for m in net.modules():
-            if isinstance(m, torch.nn.Dropout):
-                m.p = 0.0
-
-        torch.backends.cudnn.enabled = False
-
-        device = next(net.parameters()).device
-
         x = torch.tensor(regressor_sequence, dtype=torch.float32).unsqueeze(0).to(device)
         baseline = x.mean(dim=1, keepdim=True).repeat(1, x.shape[1], 1)
+        explainer = shap.GradientExplainer(shap_model, baseline)
+        shap_values = explainer.shap_values(x)
+        attr = shap_values[0] if isinstance(shap_values, list) else shap_values
+        attr = np.asarray(attr).squeeze()
+        if attr.ndim == 3:
+            attr = attr[..., 0]
 
-        attr = ig.attribute(x, baseline)
-        attr = attr.squeeze(0).detach().cpu().numpy()
+        abs_attr = np.abs(attr)
+        time_importance = np.mean(abs_attr, axis=1)
 
-        feat_importance = np.mean(np.abs(attr), axis=0)
-        time_importance = np.mean(np.abs(attr), axis=1)
+        feature_names = _build_feature_names(
+            n_features=regressor_sequence.shape[1],
+            n_estimators=len(predictions),
+        )
 
-        # Heatmap tempo x feature
         plt.figure(figsize=(10,4))
-        plt.imshow(np.abs(attr).T, aspect="auto", cmap="hot")
-        plt.colorbar(label="Attribution")
+        plt.imshow(abs_attr.T, aspect="auto", cmap="inferno", vmin=0.0, vmax=np.percentile(abs_attr, 99))
+        plt.colorbar(label="|SHAP value|")
         plt.xlabel("Time window")
         plt.ylabel("Feature")
-        plt.title(f"Subject {subject} - Attribution heatmap")
+        plt.title(f"Subject {subject} - SHAP heatmap")
         plt.tight_layout()
         plt.savefig(stats_folder + f"subject_{subject}_explain_heatmap.png", dpi=300)
         plt.close()
 
-        # Feature importance
-        plt.figure(figsize=(6,3))
-        plt.bar(range(len(feat_importance)), feat_importance)
-        plt.xlabel("Feature index")
-        plt.ylabel("Mean attribution")
-        plt.title(f"Subject {subject} - Feature importance")
+        plt.figure(figsize=(8, 5))
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"The NumPy global RNG was seeded by calling `np.random.seed`.*",
+                category=FutureWarning,
+            )
+            shap.summary_plot(
+                attr,
+                features=regressor_sequence,
+                feature_names=feature_names,
+                show=False,
+                plot_size=None,
+            )
+        plt.title(f"Subject {subject} - SHAP summary")
         plt.tight_layout()
-        plt.savefig(stats_folder + f"subject_{subject}_explain_features.png", dpi=300)
+        plt.savefig(stats_folder + f"subject_{subject}_shap_summary.png", dpi=300)
         plt.close()
 
-        # Time importance
+        plt.figure(figsize=(8, 5))
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"The NumPy global RNG was seeded by calling `np.random.seed`.*",
+                category=FutureWarning,
+            )
+            shap.summary_plot(
+                attr,
+                features=regressor_sequence,
+                feature_names=feature_names,
+                plot_type="bar",
+                show=False,
+                plot_size=None,
+            )
+        plt.title(f"Subject {subject} - SHAP bar summary")
+        plt.tight_layout()
+        plt.savefig(stats_folder + f"subject_{subject}_shap_summary_bar.png", dpi=300)
+        plt.close()
+
         plt.figure(figsize=(8,3))
         plt.plot(time_importance)
         plt.xlabel("Time window")
-        plt.ylabel("Mean attribution")
-        plt.title(f"Subject {subject} - Time importance")
+        plt.ylabel("Mean |SHAP value|")
+        plt.title(f"Subject {subject} - SHAP time importance")
         plt.tight_layout()
         plt.savefig(stats_folder + f"subject_{subject}_explain_time.png", dpi=300)
         plt.close()

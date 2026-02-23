@@ -11,14 +11,14 @@ from predict_samples import build_estimators_list, predict_samples
 from skorch_models import make_gru_regressor_net, save_best_estimator_plots
 
 REGRESSOR_PARAM_GRID = {
-    "lr": [1e-3, 7e-4],
+    "lr": [1e-3],
     "max_epochs": [160],
     "batch_size": [16],
     "module__bidirectional": [True],
-    "module__hidden_size": [48, 64, 80],
-    "module__num_layers": [1, 2],
-    "module__dropout": [0.0, 0.1],
-    "optimizer__weight_decay": [0.0, 1e-4],
+    "module__hidden_size": [48],
+    "module__num_layers": [1],
+    "module__dropout": [0.0],
+    "optimizer__weight_decay": [0.0],
     "callbacks__early_stopping__patience": [25],
 }
 
