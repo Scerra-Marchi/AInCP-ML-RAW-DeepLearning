@@ -35,14 +35,7 @@ def test_classifier_regressor(
             subject_metadata,
         )
         hp_tot_list_list.append(hp_tot)
-        sequence_list.append(
-            build_regressor_sequence(
-                y_list,
-                invalid_bitmap,
-                window_size,
-                decimation_factor=decimation_factor,
-            )
-        )
+        sequence_list.append(build_regressor_sequence(y_list, invalid_bitmap, window_size, decimation_factor))
 
         #   hp_tot_list_list =                 y =
         #   [[ 95.0, 90.0, 80.0],              [56,

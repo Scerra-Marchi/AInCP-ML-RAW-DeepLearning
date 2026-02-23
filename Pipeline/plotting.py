@@ -108,12 +108,7 @@ def plot_dashboards(
         )
 
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
-        regressor_sequence = build_regressor_sequence(
-            predictions,
-            invalid_bitmap,
-            window_size,
-            decimation_factor=decimation_factor,
-        )
+        regressor_sequence = build_regressor_sequence(predictions, invalid_bitmap, window_size, decimation_factor)
         window_timestamps = timestamps[::window_size][:regressor_sequence.shape[0]]
 
         mag_D, mag_ND = read_file(
