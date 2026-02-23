@@ -4,7 +4,7 @@ import pandas as pd
 import joblib as jl
 from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
-from train_regressor import regressor_hash_from_estimators_specs
+from train_regressor import regressor_model_path, build_regressor_sequence
 
 def test_classifier_regressor(
     data_folder,
@@ -26,14 +26,16 @@ def test_classifier_regressor(
     model_params_list = [es["estimator"].get_params() for es in estimators_list]
 
     hp_tot_list_list = []
+    sequence_list = []
     
     for _, subject_metadata in metadata.iterrows():
-        _, hp_tot, _ = predict_samples(
+        y_list, hp_tot, invalid_bitmap = predict_samples(
             data_folder,
             estimators_list,
             subject_metadata,
         )
         hp_tot_list_list.append(hp_tot)
+        sequence_list.append(build_regressor_sequence(y_list, invalid_bitmap))
 
         #   hp_tot_list_list =                 y =
         #   [[ 95.0, 90.0, 80.0],              [56,
@@ -47,7 +49,7 @@ def test_classifier_regressor(
     #    x.append(hp_tot[0])
     #    y.append(subject_metadata['AHA'])
 
-    X = np.array(hp_tot_list_list)
+    X_seq = np.stack(sequence_list).astype(np.float32)
     y = np.array(metadata['AHA'].values)
 
     # Organizing data into a dictionary
@@ -59,13 +61,16 @@ def test_classifier_regressor(
         "Correlation Coefficient": np.corrcoef(np.array(hp_tot_list_list)[:, 0], y)[0, 1]
     }
 
-    reg_path = 'regressor_' + regressor_hash_from_estimators_specs(estimators_specs_list)
-    #regressor = BaseEstimator().load_from_path(save_folder + 'Regressors/' + reg_path)
-    regressor = jl.load(save_folder + 'Regressors/' + reg_path)
+    model_path = regressor_model_path(
+        save_folder=save_folder,
+        estimators_list=estimators_list,
+    )
+    regressor = jl.load(model_path)
+    y_pred = np.asarray(regressor.predict(X_seq), dtype=float)
 
     data_regression = {
-        "Regressor path": reg_path,
-        "R2 Score": r2_score(y, regressor.predict(X)),
+        "Regressor path": model_path,
+        "R2 Score": r2_score(y, y_pred),
         "Classifiers Used": model_params_list
     }
 
