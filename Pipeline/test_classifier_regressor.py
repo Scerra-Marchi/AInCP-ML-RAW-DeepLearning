@@ -12,7 +12,7 @@ def test_classifier_regressor(
     metadata,
     min_mean_test_score=None,
     window_size=None,
-    decimation_factor=None,
+    decimation_factor=1,
 ):
     best_estimators_df = pd.read_csv(save_folder + 'best_estimators_results.csv', index_col=0).sort_values(by=['mean_test_score', 'std_test_score'], ascending=False)
 
@@ -35,7 +35,14 @@ def test_classifier_regressor(
             subject_metadata,
         )
         hp_tot_list_list.append(hp_tot)
-        sequence_list.append(build_regressor_sequence(y_list, invalid_bitmap, window_size))
+        sequence_list.append(
+            build_regressor_sequence(
+                y_list,
+                invalid_bitmap,
+                window_size,
+                decimation_factor=decimation_factor,
+            )
+        )
 
         #   hp_tot_list_list =                 y =
         #   [[ 95.0, 90.0, 80.0],              [56,

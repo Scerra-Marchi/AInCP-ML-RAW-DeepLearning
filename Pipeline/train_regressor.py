@@ -39,7 +39,7 @@ def regressor_model_path(save_folder, estimators_list):
     return os.path.join(save_folder, "Regressors", f"regressor_{reg_hash}", "regressor.joblib")
 
 
-def build_regressor_sequence(predictions_list, invalid_bitmap, window_size, fs=80):
+def build_regressor_sequence(predictions_list, invalid_bitmap, window_size, decimation_factor, fs=80):
     """
     Create per-subject sequence features:
     estimator probs + invalid bit + cyclic time-of-day (sin, cos)
@@ -53,8 +53,9 @@ def build_regressor_sequence(predictions_list, invalid_bitmap, window_size, fs=8
     invalid_col = invalid.astype(np.float32).reshape(-1, 1)
 
     # ---- TIME COMPUTATION ----
-    # seconds per window
-    seconds_per_window = window_size / fs
+    # seconds per window in the decimated signal.
+    # With decimation_factor=d, effective sampling frequency is fs/d.
+    seconds_per_window = window_size * decimation_factor / fs
 
     # absolute time in seconds from file start
     t_abs = np.arange(n_windows, dtype=np.float32) * seconds_per_window
@@ -110,7 +111,7 @@ def train_regressor(
     metadata,
     min_mean_test_score=None,
     window_size=None,
-    decimation_factor=None,
+    decimation_factor=1,
 ):
     """Train (or reuse) the hash-addressed regressor built on selected classifier outputs."""
     # Select and load classifiers used to generate regressor inputs.
@@ -150,7 +151,8 @@ def train_regressor(
         sequence_list.append(build_regressor_sequence(
                             estimator_probs_list,
                             invalid_bitmap,
-                            window_size=window_size))
+                            window_size=window_size,
+                            decimation_factor=decimation_factor))
         
         print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'END')
 
