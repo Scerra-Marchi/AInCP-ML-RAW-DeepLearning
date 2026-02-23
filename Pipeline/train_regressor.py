@@ -148,11 +148,7 @@ def train_regressor(
             subject_metadata,
         )
         
-        sequence_list.append(build_regressor_sequence(
-                            estimator_probs_list,
-                            invalid_bitmap,
-                            window_size=window_size,
-                            decimation_factor=decimation_factor))
+        sequence_list.append(build_regressor_sequence(estimator_probs_list, invalid_bitmap, window_size, decimation_factor))
         
         print('REGRESSOR: PATIENT ', subject_metadata['subject'], 'END')
 
