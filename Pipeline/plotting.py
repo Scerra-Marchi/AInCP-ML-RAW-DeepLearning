@@ -45,7 +45,7 @@ def plot_dashboards(
     metadata,
     min_mean_test_score=None,
     window_size=None,
-    decimation_factor=None,
+    decimation_factor=1,
 ):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,8 +108,12 @@ def plot_dashboards(
         )
 
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
-
-        regressor_sequence = build_regressor_sequence(predictions, invalid_bitmap, window_size)
+        regressor_sequence = build_regressor_sequence(
+            predictions,
+            invalid_bitmap,
+            window_size,
+            decimation_factor=decimation_factor,
+        )
         window_timestamps = timestamps[::window_size][:regressor_sequence.shape[0]]
 
         mag_D, mag_ND = read_file(
