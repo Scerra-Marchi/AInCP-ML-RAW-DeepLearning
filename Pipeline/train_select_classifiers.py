@@ -2,7 +2,7 @@
 # - windowing strategies (method)
 # - window sizes (number of points)
 # - decimation factors
-# - model families (LSTM/GRU/RNN/CNN1D/Transformer/Reservoir)
+# - model families (NeuralNet/XGBoost/CNN1D/Transformer/Reservoir)
 #
 # The function runs a Ray Tune job over the full Cartesian grid; each trial skips work
 # when its artifacts are already present on disk, then cv_results.csv files are aggregated
@@ -16,24 +16,21 @@ import random
 import torch
 from skorch_models import (
     Conv1DSequenceClassifier,
-    GRUSequenceClassifier,
-    LSTMSequenceClassifier,
-    RNNSequenceClassifier,
+    MLPSequenceClassifier,
     ReservoirSequenceClassifier,
     TransformerSequenceClassifier,
     make_bce_net,
+    make_xgboost_classifier,
 )
 from ray.tune import TuneConfig
 
 MODULE_CLASS_BY_NAME = {
-    "LSTM": LSTMSequenceClassifier,
-    "GRU": GRUSequenceClassifier,
-    "RNN": RNNSequenceClassifier,
+    "NeuralNet": MLPSequenceClassifier,
     "CNN1D": Conv1DSequenceClassifier,
     "Transformer": TransformerSequenceClassifier,
     "Reservoir": ReservoirSequenceClassifier,
 }
-DEFAULT_MODEL_NAMES = tuple(MODULE_CLASS_BY_NAME.keys())
+DEFAULT_MODEL_NAMES = ("NeuralNet", "XGBoost", "CNN1D", "Transformer", "Reservoir")
 
 
 def _safe_model_name(name: str) -> str:
@@ -65,106 +62,233 @@ def train_select_classifiers(
     # NOTE: only lightweight, picklable fields are kept in specs (no estimator objects).
     gridsearch_specs_list = [
         {
-            "name": "LSTM",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False, True],
-            },
+            "name": "NeuralNet",
+            # Fine sweep around the best Iteration_0 region (deeper/wider, low regularization).
+            "param_grid": [
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [2e-4],
+                    "max_epochs": [150],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__hidden_size": [256],
+                    "module__num_layers": [3],
+                    "module__dropout": [0.1],
+                },
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [3e-4],
+                    "max_epochs": [150],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__hidden_size": [256],
+                    "module__num_layers": [4],
+                    "module__dropout": [0.0],
+                },
+                {
+                    "optimizer__weight_decay": [1e-5],
+                    "lr": [2e-4],
+                    "max_epochs": [150],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__hidden_size": [384],
+                    "module__num_layers": [4],
+                    "module__dropout": [0.0],
+                },
+            ],
         },
         {
-            "name": "GRU",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False, True],
-            },
-        },
-        {
-            "name": "RNN",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False],
-                "module__nonlinearity": ["tanh", "relu"],
-            },
+            "name": "XGBoost",
+            # Coarse sweep: shallow/regularized -> deeper/less regularized.
+            "param_grid": [
+                {
+                    "n_estimators": [100],
+                    "max_depth": [2],
+                    "learning_rate": [0.3],
+                    "subsample": [0.7],
+                    "colsample_bytree": [0.7],
+                    "min_child_weight": [10.0],
+                    "reg_alpha": [1.0],
+                    "reg_lambda": [10.0],
+                    "gamma": [1.0],
+                },
+                {
+                    "n_estimators": [300],
+                    "max_depth": [4],
+                    "learning_rate": [0.1],
+                    "subsample": [0.8],
+                    "colsample_bytree": [0.8],
+                    "min_child_weight": [1.0],
+                    "reg_alpha": [0.1],
+                    "reg_lambda": [3.0],
+                    "gamma": [0.0],
+                },
+                {
+                    "n_estimators": [700],
+                    "max_depth": [8],
+                    "learning_rate": [0.03],
+                    "subsample": [1.0],
+                    "colsample_bytree": [1.0],
+                    "min_child_weight": [1.0],
+                    "reg_alpha": [0.0],
+                    "reg_lambda": [1.0],
+                    "gamma": [0.0],
+                },
+            ],
         },
         {
             "name": "CNN1D",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__channels": [16, 32, 64],
-                "module__kernel_size": [5, 7],
-                "module__dropout": [0.0, 0.3],
-            },
-        },
-        {
-            "name": "Transformer",
-            # Use a list of grids to avoid invalid (d_model, nhead) combinations.
+            # Iteration_0 collapsed to the same score across all coarse settings; shift regime.
             "param_grid": [
                 {
                     "optimizer__weight_decay": [1e-4],
-                    "lr": [3e-4, 1e-3],
+                    "lr": [1e-3],
                     "max_epochs": [200],
-                    "batch_size": [128],
+                    "batch_size": [64],
                     "callbacks__early_stopping__patience": [25],
-                    "module__d_model": [32],
-                    "module__nhead": [4, 8],
-                    "module__num_layers": [2, 3],
-                    "module__dim_feedforward": [128],
+                    "module__channels": [32],
+                    "module__kernel_size": [5],
                     "module__dropout": [0.1],
-                    "module__patch_size": [32],
                 },
                 {
                     "optimizer__weight_decay": [1e-4],
-                    "lr": [3e-4, 1e-3],
+                    "lr": [5e-4],
+                    "max_epochs": [200],
+                    "batch_size": [64],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__channels": [64],
+                    "module__kernel_size": [7],
+                    "module__dropout": [0.1],
+                },
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [3e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [30],
+                    "module__channels": [96],
+                    "module__kernel_size": [11],
+                    "module__dropout": [0.0],
+                },
+                {
+                    "optimizer__weight_decay": [1e-5],
+                    "lr": [7e-4],
+                    "max_epochs": [200],
+                    "batch_size": [64],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__channels": [48],
+                    "module__kernel_size": [9],
+                    "module__dropout": [0.2],
+                },
+            ],
+        },
+        {
+            "name": "Transformer",
+            # Fine sweep around the best Iteration_0 region (large model, small patch, low regularization).
+            "param_grid": [
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [1e-4],
                     "max_epochs": [200],
                     "batch_size": [128],
                     "callbacks__early_stopping__patience": [25],
-                    "module__d_model": [64],
+                    "module__d_model": [96],
                     "module__nhead": [8],
-                    "module__num_layers": [2, 3],
+                    "module__num_layers": [3],
+                    "module__dim_feedforward": [384],
+                    "module__dropout": [0.1],
+                    "module__patch_size": [16],
+                },
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [1e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__d_model": [128],
+                    "module__nhead": [8],
+                    "module__num_layers": [4],
+                    "module__dim_feedforward": [512],
+                    "module__dropout": [0.0],
+                    "module__patch_size": [16],
+                },
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [2e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__d_model": [128],
+                    "module__nhead": [8],
+                    "module__num_layers": [4],
                     "module__dim_feedforward": [256],
                     "module__dropout": [0.1],
-                    "module__patch_size": [32],
+                    "module__patch_size": [16],
+                },
+                {
+                    "optimizer__weight_decay": [1e-5],
+                    "lr": [1e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [30],
+                    "module__d_model": [128],
+                    "module__nhead": [8],
+                    "module__num_layers": [3],
+                    "module__dim_feedforward": [512],
+                    "module__dropout": [0.1],
+                    "module__patch_size": [16],
                 },
             ],
         },
         {
             "name": "Reservoir",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0],
-                "lr": [1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__reservoir_size": [200, 400],
-                "module__spectral_radius": [0.8, 0.9, 1.0],
-                "module__leak_rate": [1.0],
-                "module__input_scaling": [0.2, 0.5],
-            },
+            # Fine sweep near the high-capacity/high-radius region that performed best in Iteration_0.
+            "param_grid": [
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [3e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__reservoir_size": [600],
+                    "module__spectral_radius": [1.1],
+                    "module__leak_rate": [1.0],
+                    "module__input_scaling": [0.7],
+                },
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [3e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__reservoir_size": [800],
+                    "module__spectral_radius": [1.2],
+                    "module__leak_rate": [1.0],
+                    "module__input_scaling": [0.8],
+                },
+                {
+                    "optimizer__weight_decay": [0.0],
+                    "lr": [2e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [30],
+                    "module__reservoir_size": [1000],
+                    "module__spectral_radius": [1.3],
+                    "module__leak_rate": [1.0],
+                    "module__input_scaling": [0.9],
+                },
+                {
+                    "optimizer__weight_decay": [1e-5],
+                    "lr": [5e-4],
+                    "max_epochs": [200],
+                    "batch_size": [128],
+                    "callbacks__early_stopping__patience": [25],
+                    "module__reservoir_size": [800],
+                    "module__spectral_radius": [1.0],
+                    "module__leak_rate": [1.0],
+                    "module__input_scaling": [0.8],
+                },
+            ],
         },
     ]
 
@@ -249,8 +373,11 @@ def train_select_classifiers(
         # Import inside the Ray worker after chdir so local imports work.
         from train_best_model import train_best_model
 
-        module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
-        estimator = make_bce_net(module)
+        if gridsearch_specs["name"] == "XGBoost":
+            estimator = make_xgboost_classifier()
+        else:
+            module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
+            estimator = make_bce_net(module)
 
         train_best_model(
             data_folder=data_folder,

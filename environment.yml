@@ -50,5 +50,6 @@ dependencies:
       - torch==2.10.0
       - skorch==1.3.1
       - ray[default,tune]
+      - xgboost==2.1.4
       - tzdata==2024.1
 prefix: /home/scerramarchi/miniconda3/envs/AInCP-ML

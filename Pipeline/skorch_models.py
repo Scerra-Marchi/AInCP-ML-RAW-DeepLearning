@@ -7,12 +7,16 @@ Changes in this file are not included in grid-search hashes.
 from __future__ import annotations
 
 import os
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
+from sklearn.base import BaseEstimator, ClassifierMixin
+from xgboost import XGBClassifier
+
 
 
 def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path):
@@ -33,7 +37,12 @@ def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_pa
 def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
     import pandas as pd
 
-    history_df = pd.DataFrame(estimator.history.to_list())
+    # Only skorch estimators expose per-epoch training history.
+    history = getattr(estimator, "history", None)
+    if history is None or not hasattr(history, "to_list"):
+        return
+
+    history_df = pd.DataFrame(history.to_list())
     x = history_df["epoch"]
     if {"train_loss", "valid_loss"}.issubset(history_df.columns):
         plot_train_valid(
@@ -117,7 +126,7 @@ def make_gru_regressor_net():
                     threshold_mode="rel",
                     lower_is_better=True,
                     load_best=True,
-                    sink=None
+                    #sink=None
                 ),
             ),
         ],
@@ -130,46 +139,36 @@ def make_gru_regressor_net():
     )
 
 
-class LSTMSequenceClassifier(nn.Module):
+class MLPSequenceClassifier(nn.Module):
     def __init__(
         self,
         *,
-        hidden_size: int = 64,
+        hidden_size: int = 128,
         num_layers: int = 1,
-        dropout: float = 0.0,
-        bidirectional: bool = False,
+        dropout: float = 0.2,
     ):
         super().__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.bidirectional = bidirectional
+        if num_layers < 1:
+            raise ValueError("num_layers must be >= 1.")
 
-        self.lstm = None
-        direction_factor = 2 if bidirectional else 1
-        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        layers = [nn.LazyLinear(hidden_size), nn.ReLU()]
+        if dropout > 0:
+            layers.append(nn.Dropout(dropout))
 
-    def _build_lstm(self, input_size, device):
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            dropout=self.dropout if self.num_layers > 1 else 0.0,
-            bidirectional=self.bidirectional,
-            batch_first=True,
-        ).to(device)
+        for _ in range(num_layers - 1):
+            layers.extend([nn.Linear(hidden_size, hidden_size), nn.ReLU()])
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+
+        self.mlp = nn.Sequential(*layers)
+        self.classifier = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
         x = x.float()
-        if x.ndim == 2:
-            x = x.unsqueeze(-1)
-
-        if self.lstm is None:
-            self._build_lstm(x.shape[-1], x.device)
-
-        self.lstm.flatten_parameters()
-        out, _ = self.lstm(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        if x.ndim > 2:
+            x = x.reshape(x.shape[0], -1)
+        hidden = self.mlp(x)
+        return self.classifier(hidden).squeeze(-1)
 
 
 
@@ -215,53 +214,83 @@ class GRUSequenceClassifier(nn.Module):
         return self.classifier(out[:, -1]).squeeze(-1)
 
 
+def _flatten_windows(X):
+    X = np.asarray(X, dtype=np.float32)
+    if X.ndim > 2:
+        X = X.reshape(X.shape[0], -1)
+    return X
 
 
-class RNNSequenceClassifier(nn.Module):
+class XGBoostSequenceClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
         *,
-        hidden_size: int = 64,
-        num_layers: int = 1,
-        dropout: float = 0.0,
-        bidirectional: bool = False,
-        nonlinearity: str = "tanh",
+        n_estimators=300,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=1.0,
+        colsample_bytree=1.0,
+        min_child_weight=1.0,
+        reg_alpha=0.0,
+        reg_lambda=1.0,
+        gamma=0.0,
+        scale_pos_weight=1.0,
+        random_state=42,
+        n_jobs=1,
     ):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.dropout = dropout
-        self.bidirectional = bidirectional
-        self.nonlinearity = nonlinearity
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.min_child_weight = min_child_weight
+        self.reg_alpha = reg_alpha
+        self.reg_lambda = reg_lambda
+        self.gamma = gamma
+        self.scale_pos_weight = scale_pos_weight
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+        self.model_ = None
 
-        self.rnn = None
-        direction_factor = 2 if bidirectional else 1
-        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+    def _make_model(self):
+        return XGBClassifier(
+            objective="binary:logistic",
+            eval_metric="logloss",
+            tree_method="hist",
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            learning_rate=self.learning_rate,
+            subsample=self.subsample,
+            colsample_bytree=self.colsample_bytree,
+            min_child_weight=self.min_child_weight,
+            reg_alpha=self.reg_alpha,
+            reg_lambda=self.reg_lambda,
+            gamma=self.gamma,
+            scale_pos_weight=self.scale_pos_weight,
+            random_state=self.random_state,
+            n_jobs=self.n_jobs,
+        )
 
-    def _build_rnn(self, input_size, device):
-        self.rnn = nn.RNN(
-            input_size=input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            dropout=self.dropout if self.num_layers > 1 else 0.0,
-            bidirectional=self.bidirectional,
-            nonlinearity=self.nonlinearity,
-            batch_first=True,
-        ).to(device)
+    def fit(self, X, y):
+        X = _flatten_windows(X)
+        y = np.asarray(y, dtype=np.int64)
+        self.classes_ = np.unique(y)
+        self.n_features_in_ = X.shape[1]
+        self.model_ = self._make_model()
+        self.model_.fit(X, y)
+        return self
 
-    def forward(self, x):
-        x = x.float()
-        if x.ndim == 2:
-            x = x.unsqueeze(-1)
+    def predict_proba(self, X):
+        X = _flatten_windows(X)
+        return self.model_.predict_proba(X)
 
-        if self.rnn is None:
-            self._build_rnn(x.shape[-1], x.device)
-
-        self.rnn.flatten_parameters()
-        out, _ = self.rnn(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+    def predict(self, X):
+        X = _flatten_windows(X)
+        return self.model_.predict(X)
 
 
+def make_xgboost_classifier():
+    return XGBoostSequenceClassifier()
 
 
 class Conv1DSequenceClassifier(nn.Module):
