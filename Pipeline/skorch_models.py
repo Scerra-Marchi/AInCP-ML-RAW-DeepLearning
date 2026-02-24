@@ -108,7 +108,8 @@ def make_gru_regressor_net():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return NeuralNetRegressor(
         module=GRUSequenceClassifier,
-        module__squeeze_output=False,
+        module__bidirectional=False,
+        module__return_all_steps=True,
         callbacks=[
             (
                 "early_stopping",
@@ -122,13 +123,29 @@ def make_gru_regressor_net():
                 ),
             ),
         ],
-        criterion=nn.MSELoss,
+        criterion=WeightedSequenceMSELoss,
         optimizer=torch.optim.AdamW,
         iterator_train__shuffle=True,
         train_split=ValidSplit(0.2, random_state=42),
         device=device,
         verbose=0,
     )
+
+
+class WeightedSequenceMSELoss(nn.Module):
+    def __init__(self, late_emphasis: float = 2.0):
+        super().__init__()
+        self.late_emphasis = late_emphasis
+
+    def forward(self, y_pred, y_true):
+        n_steps = y_pred.shape[1]
+        # Linearly increase timestep weight from 1.0 (early) to late_emphasis (late).
+        weights = torch.linspace(1.0, float(self.late_emphasis), n_steps, device=y_pred.device, dtype=y_pred.dtype)
+        weights = weights / weights.mean()
+        y_true_seq = y_true.unsqueeze(1).expand(-1, n_steps, -1)
+
+        sq_err = (y_pred - y_true_seq) ** 2
+        return (sq_err * weights.view(1, -1, 1)).mean()
 
 
 class LSTMSequenceClassifier(nn.Module):
@@ -182,14 +199,14 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
-        squeeze_output: bool = True,
+        return_all_steps: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
-        self.squeeze_output = squeeze_output
+        self.return_all_steps = return_all_steps
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
@@ -215,8 +232,9 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
-        logits = self.classifier(out[:, -1])
-        return logits.squeeze(-1) if self.squeeze_output else logits
+        if self.return_all_steps:
+            return self.classifier(out)
+        return self.classifier(out[:, -1]).squeeze(-1)
 
 
 

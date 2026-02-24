@@ -68,7 +68,6 @@ def plot_dashboards(
 
     # --- SHAP setup ---
     net = regressor.module_
-    torch.set_grad_enabled(True)
     net.eval()
     device = next(net.parameters()).device
 
@@ -105,8 +104,8 @@ def plot_dashboards(
         healthy_percentage.append(hp_tot_list)
         real_aha = subject_metadata['AHA']
 
-        predicted_aha = np.asarray(regressor.predict(regressor_sequence[np.newaxis, :, :]), dtype=float).squeeze()
-        predicted_aha = float(np.clip(predicted_aha, 0, 100))
+        regressor_output = np.asarray(regressor.predict(regressor_sequence[np.newaxis, :, :]), dtype=float)
+        predicted_aha = float(np.clip(regressor_output[0, -1, 0], 0, 100))
         predicted_aha_list.append(predicted_aha)
 
         print('Patient ', subject)
@@ -118,8 +117,10 @@ def plot_dashboards(
 
         x = torch.tensor(regressor_sequence, dtype=torch.float32).unsqueeze(0).to(device)
         baseline = x.mean(dim=1, keepdim=True).repeat(1, x.shape[1], 1)
+        net.return_all_steps = False
         explainer = shap.GradientExplainer(net, baseline)
         shap_values = explainer.shap_values(x)
+        net.return_all_steps = True
         attr = shap_values[0] if isinstance(shap_values, list) else shap_values
         attr = np.asarray(attr).squeeze()
         if attr.ndim == 3:
@@ -262,11 +263,7 @@ def plot_dashboards(
         plt.close()
 
         ##################### PREDICTED AHA PLOT ####################
-        aha_prefix = []
-        for stop in range(1, regressor_sequence.shape[0] + 1):
-            seq_prefix = regressor_sequence[:stop]
-            predicted_prefix_aha = np.asarray(regressor.predict(seq_prefix[np.newaxis, :, :]), dtype=float).squeeze()
-            aha_prefix.append(float(np.clip(predicted_prefix_aha, 0, 100)))
+        aha_timeline = np.clip(regressor_output[0, :, 0], 0, 100)
 
         plt.grid()
         ax = plt.gca()
@@ -275,7 +272,7 @@ def plot_dashboards(
         plt.axhline(y = real_aha, color = 'b', linestyle = '--', linewidth= 1, label='AHA')
         plt.xlabel("Orario")
         plt.ylabel("Home-AHA")
-        plt.plot(window_timestamps, aha_prefix, c='green')
+        plt.plot(window_timestamps, aha_timeline, c='green')
         plt.legend()
         plt.gcf().set_size_inches(8, 2)
         plt.tight_layout()
