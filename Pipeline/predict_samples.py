@@ -23,7 +23,7 @@ def build_estimators_list(best_estimators_df, save_folder, min_mean_test_score, 
 
     for estimators_specs in estimators_specs_list:
         estimator_dir = (
-            save_folder + "Trained_models/" + estimators_specs["method"] + "/" + str(estimators_specs["window_size"]) + "_points/" + str(estimators_specs["decimation_factor"]) + "_decimation_factor/" + estimators_specs["model_type"].split(".")[-1] + "/gridsearch_" + estimators_specs["gridsearch_hash"] + "/"
+            save_folder + "Trained_models/" + estimators_specs["method"] + "/" + str(estimators_specs["window_size"]) + "_points/" + str(estimators_specs["decimation_factor"]) + "_decimation_factor/" + estimators_specs["model_type"].split(".")[-1] + "/gridsearch_" + str(estimators_specs["gridsearch_hash"]) + "/"
         )
 
         print("Loading -> ", estimator_dir + "best_estimator.joblib")
