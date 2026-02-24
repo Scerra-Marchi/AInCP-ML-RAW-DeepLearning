@@ -8,7 +8,6 @@ import numpy as np
 from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
-import math
 from train_regressor import regressor_model_path, build_regressor_sequence
 from read_file import read_file
 
@@ -88,13 +87,6 @@ def plot_dashboards(
     torch.backends.cudnn.enabled = False
 
     timestamps = jl.load(timestamps_file)
-
-    ds_freq = 80/decimation_factor
-    sample_size = math.ceil(window_size / ds_freq)
-
-    trend_block_size = int((60 * 60 * 6) / sample_size)
-    block_samples = int(6 * 60 * 60 * ds_freq)
-    significativity_threshold = 75
 
     healthy_percentage = []
     predicted_aha_list = []
@@ -225,27 +217,6 @@ def plot_dashboards(
         plt.savefig(stats_folder + 'subject_' +str(subject)+'_mag.png', dpi = 500)
         plt.close()
 
-        ########################## AI PLOT ##########################
-        ai_list = []
-        subList_magD = [mag_D[n:n+block_samples] for n in range(0, len(mag_D), block_samples)]
-        subList_magND = [mag_ND[n:n+block_samples] for n in range(0, len(mag_ND), block_samples)]
-        for l in range(len(subList_magD)):
-            if (subList_magD[l].mean() + subList_magND[l].mean()) == 0:
-                ai_list.append(np.nan)
-            else:
-                ai_list.append(((subList_magD[l].mean() - subList_magND[l].mean()) / (subList_magD[l].mean() + subList_magND[l].mean())) * 100)
-
-        plt.xlabel("Orario")
-        plt.ylabel("Asimmetry Index")
-        plt.grid()
-        ax = plt.gca()
-        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.plot(timestamps[::block_samples], ai_list)
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_AI.png', dpi = 500)
-        plt.close()
-
         #################### GRAFICO DEI PUNTI ####################
         ax = plt.gca()
         ax.set_ylim([0,1])
@@ -259,94 +230,54 @@ def plot_dashboards(
         plt.savefig(stats_folder + '/subject_' +str(subject)+'_samples.png', dpi = 500)
         plt.close()
 
-        #################### ANDAMENTO A BLOCCHI ####################
-        for pred in predictions:
-            h_perc_list = []
-            for start in range(0, len(pred), trend_block_size):
-                pred_block = pred[start:start + trend_block_size]
-                invalid_block = invalid_mask[start:start + trend_block_size]
+        #################### CPI TIMELINE ####################
+        valid_per_window = (~invalid_mask).astype(float)
+        cumulative_valid_count = np.cumsum(valid_per_window)
 
-                valid_count_block = int((~invalid_block).sum())
-                valid_ratio = (valid_count_block / invalid_block.size) * 100
-
-                if valid_ratio < significativity_threshold or valid_count_block == 0:
-                    h_perc_list.append(np.nan)
-                else:
-                    h_perc_list.append(float(np.mean(pred_block[~invalid_block])))
-
-            plt.grid()
-            ax = plt.gca()
-            ax.set_ylim([0,1])
-            ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-            plt.plot(timestamps[::block_samples], h_perc_list, drawstyle = 'steps-post')
-
-        plt.xlabel("Orario")
-        plt.ylabel("CPI")
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_CPIblocks.png', dpi = 500)
-        plt.close()
-
-        ##################### ANDAMENTO SMOOTH ######################
         plt.grid()
         ax = plt.gca()
         ax.set_ylim([0,1])
         ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        for pred in predictions:
-            h_perc_list_smooth = []
-            h_perc_list_smooth_significativity = []
-            for start in range(0, len(pred) - trend_block_size + 1):
-                pred_window = pred[start:start + trend_block_size]
-                invalid_window = invalid_mask[start:start + trend_block_size]
-                valid_count_window = int((~invalid_window).sum())
-                valid_ratio = (valid_count_window / invalid_window.size) * 100
-                h_perc_list_smooth_significativity.append(valid_ratio)
-
-                if valid_ratio < significativity_threshold or valid_count_window == 0:
-                    h_perc_list_smooth.append(np.nan)
-                else:
-                    h_perc_list_smooth.append(float(np.mean(pred_window[~invalid_window])))
-
-            plot_h_perc_list_smooth = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth
-            plt.plot(window_timestamps, plot_h_perc_list_smooth)
-
+        for i, pred in enumerate(predictions):
+            pred = np.asarray(pred, dtype=float)
+            cumulative_valid_sum = np.cumsum(np.where(~invalid_mask, pred, 0.0))
+            cpi_timeline = np.divide(
+                cumulative_valid_sum,
+                cumulative_valid_count,
+                out=np.full(cumulative_valid_sum.shape, np.nan, dtype=float),
+                where=cumulative_valid_count > 0,
+            )
+            plt.plot(window_timestamps, cpi_timeline, label=f"classifier_{i}")
+        if len(predictions) > 1:
+            plt.legend()
         plt.xlabel("Orario")
         plt.ylabel("CPI")
         plt.gcf().set_size_inches(8, 2)
         plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_CPIsmooth.png', dpi = 500)
+        plt.savefig(stats_folder + '/subject_' +str(subject)+'_CPI_timeline.png', dpi = 500)
         plt.close()
 
-        ##################### SIGNIFICATIVITY PLOT ####################
+        ##################### SIGNIFICATIVITY TIMELINE ######################
+        significance_timeline = (100.0 * cumulative_valid_count) / np.arange(1, len(invalid_mask) + 1, dtype=float)
+
         plt.grid()
         ax = plt.gca()
-        ax.set_ylim([-1,101])
+        ax.set_ylim([0,100])
         ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.axhline(y = significativity_threshold, color = 'r', linestyle = '-', label='Soglia')
-        plot_h_perc_list_smooth_significativity = [np.nan] * (trend_block_size - 1) + h_perc_list_smooth_significativity
-        plt.plot(window_timestamps, plot_h_perc_list_smooth_significativity)
-        plt.legend()
+        plt.plot(window_timestamps, significance_timeline)
         plt.xlabel("Orario")
         plt.ylabel("Significatività")
         plt.gcf().set_size_inches(8, 2)
         plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_sig.png', dpi = 500)
+        plt.savefig(stats_folder + '/subject_' +str(subject)+'_validity_timeline.png', dpi = 500)
         plt.close()
 
         ##################### PREDICTED AHA PLOT ####################
-        aha_list_smooth = []
-        for start in range(0, regressor_sequence.shape[0] - trend_block_size + 1):
-            stop = start + trend_block_size
-            invalid_window = invalid_mask[start:stop]
-            valid_count_window = int((~invalid_window).sum())
-            valid_ratio = (valid_count_window / invalid_window.size) * 100
-
-            if valid_ratio < significativity_threshold or valid_count_window == 0:
-                aha_list_smooth.append(np.nan)
-            else:
-                seq_window = regressor_sequence[start:stop]
-                predicted_window_aha = regressor.predict(seq_window[np.newaxis, :, :])[0]
-                aha_list_smooth.append(float(np.clip(predicted_window_aha, 0, 100)))
+        aha_prefix = []
+        for stop in range(1, regressor_sequence.shape[0] + 1):
+            seq_prefix = regressor_sequence[:stop]
+            predicted_prefix_aha = regressor.predict(seq_prefix[np.newaxis, :, :])[0]
+            aha_prefix.append(float(np.clip(predicted_prefix_aha, 0, 100)))
 
         plt.grid()
         ax = plt.gca()
@@ -355,8 +286,7 @@ def plot_dashboards(
         plt.axhline(y = real_aha, color = 'b', linestyle = '--', linewidth= 1, label='AHA')
         plt.xlabel("Orario")
         plt.ylabel("Home-AHA")
-        plot_aha_list_smooth = [np.nan] * (trend_block_size - 1) + aha_list_smooth
-        plt.plot(window_timestamps, plot_aha_list_smooth, c='green')
+        plt.plot(window_timestamps, aha_prefix, c='green')
         plt.legend()
         plt.gcf().set_size_inches(8, 2)
         plt.tight_layout()
