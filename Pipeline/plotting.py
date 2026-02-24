@@ -15,16 +15,6 @@ import torch
 import shap
 
 
-class _RegressorShapWrapper(torch.nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-
-    def forward(self, x):
-        out = self.model(x)
-        return out.unsqueeze(-1) if out.ndim == 1 else out
-
-
 def _build_feature_names(n_features, n_estimators):
     names = [f"classifier_{i}" for i in range(n_estimators)]
     names += ["invalid_flag", "time_sin", "time_cos"]
@@ -78,7 +68,6 @@ def plot_dashboards(
 
     # --- SHAP setup ---
     net = regressor.module_
-    shap_model = _RegressorShapWrapper(net)
     torch.set_grad_enabled(True)
     net.eval()
     device = next(net.parameters()).device
@@ -116,7 +105,7 @@ def plot_dashboards(
         healthy_percentage.append(hp_tot_list)
         real_aha = subject_metadata['AHA']
 
-        predicted_aha = regressor.predict(regressor_sequence[np.newaxis, :, :])[0]
+        predicted_aha = np.asarray(regressor.predict(regressor_sequence[np.newaxis, :, :]), dtype=float).squeeze()
         predicted_aha = float(np.clip(predicted_aha, 0, 100))
         predicted_aha_list.append(predicted_aha)
 
@@ -129,7 +118,7 @@ def plot_dashboards(
 
         x = torch.tensor(regressor_sequence, dtype=torch.float32).unsqueeze(0).to(device)
         baseline = x.mean(dim=1, keepdim=True).repeat(1, x.shape[1], 1)
-        explainer = shap.GradientExplainer(shap_model, baseline)
+        explainer = shap.GradientExplainer(net, baseline)
         shap_values = explainer.shap_values(x)
         attr = shap_values[0] if isinstance(shap_values, list) else shap_values
         attr = np.asarray(attr).squeeze()
@@ -276,7 +265,7 @@ def plot_dashboards(
         aha_prefix = []
         for stop in range(1, regressor_sequence.shape[0] + 1):
             seq_prefix = regressor_sequence[:stop]
-            predicted_prefix_aha = regressor.predict(seq_prefix[np.newaxis, :, :])[0]
+            predicted_prefix_aha = np.asarray(regressor.predict(seq_prefix[np.newaxis, :, :]), dtype=float).squeeze()
             aha_prefix.append(float(np.clip(predicted_prefix_aha, 0, 100)))
 
         plt.grid()

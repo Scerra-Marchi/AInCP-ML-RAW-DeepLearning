@@ -14,7 +14,8 @@ REGRESSOR_PARAM_GRID = {
     "lr": [1e-3],
     "max_epochs": [160],
     "batch_size": [16],
-    "module__bidirectional": [True],
+    # Keep this False: regression is used for causal/evolving predictions over time.
+    "module__bidirectional": [False],
     "module__hidden_size": [48],
     "module__num_layers": [1],
     "module__dropout": [0.0],
@@ -154,8 +155,8 @@ def train_regressor(
 
     # Assemble training tensors and stratification labels.
     X = np.stack(sequence_list).astype(np.float32)
-    y = metadata["AHA"].to_numpy(dtype=np.float32)
-    strat_labels = (y == 100).astype(int)
+    y = metadata["AHA"].to_numpy(dtype=np.float32).reshape(-1, 1)
+    strat_labels = (y[:, 0] == 100).astype(int)
 
     model = _fit_regressor_with_grid_search(
         X,

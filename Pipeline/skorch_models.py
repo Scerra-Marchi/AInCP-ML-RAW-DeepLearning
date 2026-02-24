@@ -108,6 +108,7 @@ def make_gru_regressor_net():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return NeuralNetRegressor(
         module=GRUSequenceClassifier,
+        module__squeeze_output=False,
         callbacks=[
             (
                 "early_stopping",
@@ -181,12 +182,14 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
+        squeeze_output: bool = True,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.squeeze_output = squeeze_output
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
@@ -212,7 +215,8 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        logits = self.classifier(out[:, -1])
+        return logits.squeeze(-1) if self.squeeze_output else logits
 
 
 

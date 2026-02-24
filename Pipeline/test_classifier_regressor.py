@@ -66,7 +66,7 @@ def test_classifier_regressor(
         estimators_list=estimators_list,
     )
     regressor = jl.load(model_path)
-    y_pred = np.asarray(regressor.predict(X_seq), dtype=float)
+    y_pred = np.asarray(regressor.predict(X_seq), dtype=float).reshape(-1)
 
     data_regression = {
         "Regressor path": model_path,
