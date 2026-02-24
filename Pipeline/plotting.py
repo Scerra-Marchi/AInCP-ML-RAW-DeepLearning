@@ -32,9 +32,10 @@ def _build_feature_names(n_features, n_estimators):
     return names[:n_features]
 
 
-def create_timestamps_list(data_folder):
+def create_timestamps_list(data_folder, decimation_factor):
     patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv', engine="pyarrow", usecols=['datetime'])
-    datetimes = pd.to_datetime(patient_df[::3]['datetime'], format='%Y-%m-%d %H:%M:%S.%f')
+    step = max(1, int(decimation_factor))
+    datetimes = pd.to_datetime(patient_df[::step]['datetime'], format='%Y-%m-%d %H:%M:%S.%f')
     timestamps_list = matplotlib.dates.date2num(datetimes.dt.to_pydatetime())
     return timestamps_list
 
@@ -49,9 +50,9 @@ def plot_dashboards(
 ):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-    timestamps_file = 'timestamps_list'
+    timestamps_file = f"timestamps_list_decim_{int(decimation_factor)}.joblib"
     if not os.path.exists(timestamps_file):
-        timestamps = create_timestamps_list(data_folder)
+        timestamps = create_timestamps_list(data_folder, decimation_factor)
         jl.dump(timestamps, timestamps_file)
 
     stats_folder = save_folder + 'Week_stats/'
