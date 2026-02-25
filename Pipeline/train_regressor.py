@@ -162,7 +162,12 @@ def train_regressor(
     # Assemble training tensors and stratification labels.
     X = np.stack(sequence_list).astype(np.float32)
     y = metadata["AHA"].to_numpy(dtype=np.float32).reshape(-1, 1)
-    strat_labels = (y[:, 0] == 100).astype(int)
+    strat_labels = pd.qcut(
+        metadata["AHA"],
+        q=6,
+        labels=False,
+        duplicates="drop",
+    ).to_numpy()
 
     model = _fit_regressor_with_grid_search(
         X,
