@@ -275,6 +275,8 @@ def plot_dashboards(
 
         ##################### PREDICTED AHA PLOT ####################
         aha_timeline = np.clip(regressor_output[0, :, 0], 0, 100)
+        aha_timeline_valid_only = aha_timeline.copy()
+        aha_timeline_valid_only[invalid_mask] = np.nan
 
         plt.grid()
         ax = plt.gca()
@@ -283,7 +285,7 @@ def plot_dashboards(
         plt.axhline(y = real_aha, color = 'b', linestyle = '--', linewidth= 1, label='AHA')
         plt.xlabel("Orario")
         plt.ylabel("Home-AHA")
-        plt.plot(window_timestamps, aha_timeline, c='green')
+        plt.plot(window_timestamps, aha_timeline_valid_only, c='green')
         plt.legend()
         plt.gcf().set_size_inches(8, 2)
         plt.tight_layout()
