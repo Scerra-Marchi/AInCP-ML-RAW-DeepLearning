@@ -25,7 +25,7 @@ def create_timestamps_list(data_folder, decimation_factor):
     patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv', engine="pyarrow", usecols=['datetime'])
     step = max(1, int(decimation_factor))
     datetimes = pd.to_datetime(patient_df[::step]['datetime'], format='%Y-%m-%d %H:%M:%S.%f')
-    timestamps_list = matplotlib.dates.date2num(np.array(datetimes.dt.to_pydatetime()))
+    timestamps_list = matplotlib.dates.date2num(datetimes.to_numpy(dtype="datetime64[ns]"))
     return timestamps_list
 
 
