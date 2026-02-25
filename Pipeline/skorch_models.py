@@ -200,6 +200,7 @@ class GRUSequenceClassifier(nn.Module):
         dropout: float = 0.0,
         bidirectional: bool = False,
         return_all_steps: bool = False,
+        keepdim_output: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -207,6 +208,7 @@ class GRUSequenceClassifier(nn.Module):
         self.dropout = dropout
         self.bidirectional = bidirectional
         self.return_all_steps = return_all_steps
+        self.keepdim_output = keepdim_output
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
@@ -234,7 +236,10 @@ class GRUSequenceClassifier(nn.Module):
         out, _ = self.gru(x)
         if self.return_all_steps:
             return self.classifier(out)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        last = self.classifier(out[:, -1])
+        if self.keepdim_output:
+            return last
+        return last.squeeze(-1)
 
 
 
