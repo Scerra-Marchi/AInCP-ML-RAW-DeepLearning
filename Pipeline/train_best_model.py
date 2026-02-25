@@ -27,16 +27,6 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
     estimator_with_weight = clone(estimator)
     estimator_params = estimator_with_weight.get_params(deep=True)
     y_fit = y.astype(np.float32) if "criterion__pos_weight" in estimator_params else y
-    subject_strat = pd.Series(
-        pd.qcut(
-            metadata["AHA"],
-            q=6,
-            labels=False,
-            duplicates="drop",
-        ).to_numpy(),
-        index=metadata["subject"].astype(int).to_numpy(),
-    )
-    strat_labels = subject_strat.loc[groups].to_numpy()
     cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
 
     if "criterion__pos_weight" in estimator_params:
@@ -50,7 +40,7 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
     parameter_tuning_method = GridSearchCV(
         estimator_with_weight,
         param_grid,
-        cv=cv.split(X, strat_labels, groups),
+        cv=cv.split(X, y, groups),
         n_jobs=1,
         return_train_score=True,
         verbose=0,
