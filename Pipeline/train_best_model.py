@@ -43,6 +43,7 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
         n_jobs=1,
         return_train_score=True,
         verbose=0,
+        refit=True,
         scoring="f1_macro", # Equal importance for classes via macro averaging.
     )
     parameter_tuning_method.fit(X, y_fit)

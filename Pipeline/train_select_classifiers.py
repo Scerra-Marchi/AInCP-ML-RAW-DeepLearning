@@ -15,6 +15,9 @@ import pandas as pd
 import random
 import torch
 from skorch_models import (
+    LSTMSequenceClassifier,
+    GRUSequenceClassifier,
+    RNNSequenceClassifier,
     Conv1DSequenceClassifier,
     MLPSequenceClassifier,
     ReservoirSequenceClassifier,
@@ -25,13 +28,15 @@ from skorch_models import (
 from ray.tune import TuneConfig
 
 MODULE_CLASS_BY_NAME = {
+    "LSTM": LSTMSequenceClassifier,
+    "GRU": GRUSequenceClassifier,
+    "RNN": RNNSequenceClassifier,
     "NeuralNet": MLPSequenceClassifier,
     "CNN1D": Conv1DSequenceClassifier,
     "Transformer": TransformerSequenceClassifier,
     "Reservoir": ReservoirSequenceClassifier,
 }
-DEFAULT_MODEL_NAMES = ("NeuralNet", "XGBoost", "CNN1D", "Transformer", "Reservoir")
-
+DEFAULT_MODEL_NAMES = tuple(MODULE_CLASS_BY_NAME.keys())
 
 def _safe_model_name(name: str) -> str:
     # Make a filesystem-friendly model name for use in output folder paths.
@@ -61,6 +66,49 @@ def train_select_classifiers(
 
     # NOTE: only lightweight, picklable fields are kept in specs (no estimator objects).
     gridsearch_specs_list = [
+        {
+            "name": "LSTM",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False, True],
+            },
+        },
+        {
+            "name": "GRU",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False, True],
+            },
+        },
+        {
+            "name": "RNN",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False],
+                "module__nonlinearity": ["tanh", "relu"],
+            },
+        },
         {
             "name": "NeuralNet",
             # Fine sweep around the best Iteration_0 region (deeper/wider, low regularization).

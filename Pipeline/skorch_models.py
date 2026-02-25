@@ -156,6 +156,93 @@ class WeightedSequenceMSELoss(nn.Module):
         return (sq_err * weights.view(1, -1, 1)).mean()
 
 
+class LSTMSequenceClassifier(nn.Module):
+    def __init__(
+        self,
+        *,
+        hidden_size: int = 64,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.bidirectional = bidirectional
+
+        self.lstm = None
+        direction_factor = 2 if bidirectional else 1
+        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+
+    def _build_lstm(self, input_size, device):
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            dropout=self.dropout if self.num_layers > 1 else 0.0,
+            bidirectional=self.bidirectional,
+            batch_first=True,
+        ).to(device)
+
+    def forward(self, x):
+        x = x.float()
+        if x.ndim == 2:
+            x = x.unsqueeze(-1)
+
+        if self.lstm is None:
+            self._build_lstm(x.shape[-1], x.device)
+
+        self.lstm.flatten_parameters()
+        out, _ = self.lstm(x)
+        return self.classifier(out[:, -1]).squeeze(-1)
+
+
+class RNNSequenceClassifier(nn.Module):
+    def __init__(
+        self,
+        *,
+        hidden_size: int = 64,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+        nonlinearity: str = "tanh",
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.bidirectional = bidirectional
+        self.nonlinearity = nonlinearity
+
+        self.rnn = None
+        direction_factor = 2 if bidirectional else 1
+        self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+
+    def _build_rnn(self, input_size, device):
+        self.rnn = nn.RNN(
+            input_size=input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            dropout=self.dropout if self.num_layers > 1 else 0.0,
+            bidirectional=self.bidirectional,
+            nonlinearity=self.nonlinearity,
+            batch_first=True,
+        ).to(device)
+
+    def forward(self, x):
+        x = x.float()
+        if x.ndim == 2:
+            x = x.unsqueeze(-1)
+
+        if self.rnn is None:
+            self._build_rnn(x.shape[-1], x.device)
+
+        self.rnn.flatten_parameters()
+        out, _ = self.rnn(x)
+        return self.classifier(out[:, -1]).squeeze(-1)
+
+
 class MLPSequenceClassifier(nn.Module):
     def __init__(
         self,
