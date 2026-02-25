@@ -25,9 +25,15 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
     counts = np.bincount(y.astype(np.int64), minlength=2)
     pos_weight_value = counts[0] / max(counts[1], 1)
     estimator_with_weight = clone(estimator)
-    estimator_with_weight.set_params(
-        criterion__pos_weight=torch.tensor(pos_weight_value, dtype=torch.float32)
-    )
+    estimator_params = estimator_with_weight.get_params(deep=True)
+    y_fit = y.astype(np.float32) if "criterion__pos_weight" in estimator_params else y
+
+    if "criterion__pos_weight" in estimator_params:
+        estimator_with_weight.set_params(
+            criterion__pos_weight=torch.tensor(pos_weight_value, dtype=torch.float32)
+        )
+    elif "scale_pos_weight" in estimator_params:
+        estimator_with_weight.set_params(scale_pos_weight=float(pos_weight_value))
 
 
     parameter_tuning_method = GridSearchCV(
@@ -37,9 +43,10 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
         n_jobs=1,
         return_train_score=True,
         verbose=0,
+        refit=True,
         scoring="f1_macro", # Equal importance for classes via macro averaging.
     )
-    parameter_tuning_method.fit(X, y)
+    parameter_tuning_method.fit(X, y_fit)
 
     estimator = parameter_tuning_method.best_estimator_
 

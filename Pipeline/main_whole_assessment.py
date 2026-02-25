@@ -21,8 +21,8 @@ DATA_FOLDER = "../Dataset/"
 
 WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
 DECIMATION_FACTOR = 3
-MODEL_NAMES = ["LSTM", "GRU", "RNN", "CNN1D", "Transformer", "Reservoir"]
-METHODS = [ "magnitude", "enmo", "raw"] # Also available: "concat", "difference", "ai"
+MODEL_NAMES = ["NeuralNet", "XGBoost", "CNN1D", "Transformer", "Reservoir"]
+METHODS = ["raw"] # Also available: "concat", "difference", "ai"
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
 # With f1_macro scoring, values are in [0, 1], and higher is better.
