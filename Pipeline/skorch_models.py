@@ -117,6 +117,8 @@ def make_gru_regressor_net():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return NeuralNetRegressor(
         module=GRUSequenceClassifier,
+        module__bidirectional=False,
+        module__return_all_steps=True,
         callbacks=[
             (
                 "early_stopping",
@@ -126,17 +128,32 @@ def make_gru_regressor_net():
                     threshold_mode="rel",
                     lower_is_better=True,
                     load_best=True,
-                    #sink=None
                 ),
             ),
         ],
-        criterion=nn.MSELoss,
+        criterion=WeightedSequenceMSELoss,
         optimizer=torch.optim.AdamW,
         iterator_train__shuffle=True,
         train_split=ValidSplit(0.2, random_state=42),
         device=device,
         verbose=0,
     )
+
+
+class WeightedSequenceMSELoss(nn.Module):
+    def __init__(self, late_emphasis: float = 2.0):
+        super().__init__()
+        self.late_emphasis = late_emphasis
+
+    def forward(self, y_pred, y_true):
+        n_steps = y_pred.shape[1]
+        # Linearly increase timestep weight from 1.0 (early) to late_emphasis (late).
+        weights = torch.linspace(1.0, float(self.late_emphasis), n_steps, device=y_pred.device, dtype=y_pred.dtype)
+        weights = weights / weights.mean()
+        y_true_seq = y_true.unsqueeze(1).expand(-1, n_steps, -1)
+
+        sq_err = (y_pred - y_true_seq) ** 2
+        return (sq_err * weights.view(1, -1, 1)).mean()
 
 
 class MLPSequenceClassifier(nn.Module):
@@ -180,12 +197,16 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
+        return_all_steps: bool = False,
+        keepdim_output: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.return_all_steps = return_all_steps
+        self.keepdim_output = keepdim_output
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
@@ -211,7 +232,12 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        if self.return_all_steps:
+            return self.classifier(out)
+        last = self.classifier(out[:, -1])
+        if self.keepdim_output:
+            return last
+        return last.squeeze(-1)
 
 
 def _flatten_windows(X):
