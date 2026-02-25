@@ -96,7 +96,7 @@ def predict_samples(data_folder, estimators, metadata_subject):
     subject_invalid_mask = None
 
     for method in missing_methods:
-        X, _, _, _, invalid_bitmap = create_windows(
+        X, _, _, _, invalid_bitmap, _ = create_windows(
             data_folder=data_folder,
             metadata=metadata_subject.to_frame().T, # Turn the Series into a single-row DataFrame
             operation_type=method,
