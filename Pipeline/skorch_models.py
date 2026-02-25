@@ -119,7 +119,6 @@ def make_gru_regressor_net():
                     threshold_mode="rel",
                     lower_is_better=True,
                     load_best=True,
-                    sink=None
                 ),
             ),
         ],
