@@ -5,20 +5,21 @@ import os
 import numpy as np
 import joblib as jl
 import pandas as pd
+from sklearn.metrics import r2_score, make_scorer
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from predict_samples import build_estimators_list, predict_samples
 from skorch_models import make_gru_regressor_net, save_best_estimator_plots
 
 REGRESSOR_PARAM_GRID = {
-    "lr": [1e-3, 7e-4],
+    "lr": [1e-3],
     "max_epochs": [160],
     "batch_size": [16],
-    "module__bidirectional": [True],
-    "module__hidden_size": [48, 64, 80],
-    "module__num_layers": [1, 2],
-    "module__dropout": [0.0, 0.1],
-    "optimizer__weight_decay": [0.0, 1e-4],
+    "module__hidden_size": [48],
+    "module__num_layers": [1],
+    "module__dropout": [0.0],
+    "criterion__late_emphasis": [2.0],
+    "optimizer__weight_decay": [0.0],
     "callbacks__early_stopping__patience": [25],
 }
 
@@ -72,14 +73,20 @@ def build_regressor_sequence(predictions_list, invalid_bitmap, window_size, deci
     return np.hstack((probs_matrix, invalid_col, time_sin, time_cos)).astype(np.float32)
 
 
+def _r2_from_sequence_output(y_true, y_pred):
+    y_pred_last = np.asarray(y_pred, dtype=float)[:, -1, 0]
+    return r2_score(np.asarray(y_true, dtype=float).reshape(-1), y_pred_last)
+
+
 def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     """Run 5-fold stratified grid search, save CSV/plots, and return the best estimator."""
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scorer = make_scorer(_r2_from_sequence_output, greater_is_better=True)
 
     grid = GridSearchCV(
         estimator=make_gru_regressor_net(),
         param_grid=param_grid,
-        scoring="r2",
+        scoring=scorer,
         cv=cv.split(X, strat_labels),
         refit=True,
         n_jobs=1,
@@ -154,8 +161,8 @@ def train_regressor(
 
     # Assemble training tensors and stratification labels.
     X = np.stack(sequence_list).astype(np.float32)
-    y = metadata["AHA"].to_numpy(dtype=np.float32)
-    strat_labels = (y == 100).astype(int)
+    y = metadata["AHA"].to_numpy(dtype=np.float32).reshape(-1, 1)
+    strat_labels = (y[:, 0] == 100).astype(int)
 
     model = _fit_regressor_with_grid_search(
         X,
