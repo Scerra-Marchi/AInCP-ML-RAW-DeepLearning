@@ -6,7 +6,7 @@ from typing import Iterable, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.model_selection import StratifiedKFold
 
 from plotting import plot_corrcoeff, plot_dashboards
 from test_classifier_regressor import test_classifier_regressor
@@ -237,9 +237,13 @@ def main() -> None:
             "AHA",
         ],
     )
-    # Stratify folds using the same classifier target definition:
-    # healthy (AHA == 100) -> 1, otherwise -> 0.
-    labels = (metadata["AHA"].to_numpy() == 100).astype(int)
+    # Stratify folds by AHA quantile bins.
+    labels = pd.qcut(
+        metadata["AHA"],
+        q=6,
+        labels=False,
+        duplicates="drop",
+    ).to_numpy()
 
     iterations_root = "Iterations_debug/" if args.debug else "Iterations/"
     if args.reset_iterations and os.path.isdir(iterations_root):
@@ -251,12 +255,12 @@ def main() -> None:
 
     min_mean_test_score = DEBUG_MIN_MEAN_TEST_SCORE if args.debug else CV_MIN_MEAN_TEST_SCORE
 
-    rskf = RepeatedStratifiedKFold(
+    skf = StratifiedKFold(
         n_splits=TOTAL_FOLDS,
-        n_repeats=1,
+        shuffle=True,
         random_state=RANDOM_STATE,
     )
-    splits = list(rskf.split(np.empty(metadata.shape[0]), labels))
+    splits = list(skf.split(np.empty(metadata.shape[0]), labels))
 
     for iteration in range(args.iterations):
         train_indexes, test_indexes = splits[iteration]
