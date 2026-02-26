@@ -7,16 +7,48 @@ Changes in this file are not included in grid-search hashes.
 from __future__ import annotations
 
 import os
+import random
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
-from skorch.callbacks import EarlyStopping, EpochScoring
+from skorch.callbacks import Callback, EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from xgboost import XGBClassifier
 
+DEFAULT_SEED = 42
+
+
+def set_global_determinism(seed: int = DEFAULT_SEED) -> None:
+    """
+    Configure Python/NumPy/PyTorch RNGs and deterministic torch backends.
+    Call this before each model fit so results do not depend on fit ordering.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except TypeError:
+        # Backward compatibility with torch versions that don't expose warn_only.
+        torch.use_deterministic_algorithms(True)
+
+
+class ResetSeedOnTrainBegin(Callback):
+    """Reset all RNGs at each fit call for deterministic skorch training."""
+
+    def __init__(self, seed: int = DEFAULT_SEED):
+        self.seed = seed
+
+    def on_train_begin(self, net, X=None, y=None, **kwargs):
+        set_global_determinism(self.seed)
 
 
 def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path):
@@ -72,6 +104,7 @@ def make_bce_net(module):
     net = NeuralNetBinaryClassifier(
         module=module,
         callbacks=[
+            ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
             (
                 "train_f1",
                 EpochScoring(
@@ -120,6 +153,7 @@ def make_gru_regressor_net():
         module__bidirectional=False,
         module__return_all_steps=True,
         callbacks=[
+            ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
             (
                 "early_stopping",
                 EarlyStopping(
