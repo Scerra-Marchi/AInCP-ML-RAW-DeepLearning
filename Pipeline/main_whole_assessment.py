@@ -6,7 +6,7 @@ from typing import Iterable, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import RepeatedStratifiedKFold
+from sklearn.model_selection import StratifiedKFold
 
 from plotting import plot_corrcoeff, plot_dashboards
 from test_classifier_regressor import test_classifier_regressor
@@ -154,7 +154,9 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
         with open(json_file_path, "r") as json_file:
             data = json.load(json_file)
         r2_list.append(data["Regressor Stats"]["R2 Score"])
-        corrcoef_list.append(data["Best Classifier Stats"]["Correlation Coefficient"])
+        corrcoef_list.append(
+            data["Selected Classifiers Stats"][0]["Correlation Mean Probability vs AHA"]
+        )
 
     if not r2_list or not corrcoef_list:
         return
@@ -163,13 +165,16 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
     average_corr_score = float(np.mean(corrcoef_list))
 
     print(f"The average r2 score for the regressor is: {average_r2_score}")
-    print(f"The average correlation CPI-AHA is: {average_corr_score}")
+    print(
+        "The average correlation CPI-AHA (using the best classifier CPI for each iteration) is: "
+        f"{average_corr_score}"
+    )
 
     results = {
         "R2 Score List": r2_list,
         "Correlation List": corrcoef_list,
         "Average R2 Score": average_r2_score,
-        "Average CPI-AHA Correlation": average_corr_score,
+        "Average CPI-AHA Correlation (Best Classifier CPI per Iteration)": average_corr_score,
     }
 
     with open(os.path.join(iterations_root, "test_results.json"), "w") as file:
@@ -237,9 +242,13 @@ def main() -> None:
             "AHA",
         ],
     )
-    # Stratify folds using the same classifier target definition:
-    # healthy (AHA == 100) -> 1, otherwise -> 0.
-    labels = (metadata["AHA"].to_numpy() == 100).astype(int)
+    # Stratify folds by AHA quantile bins.
+    labels = pd.qcut(
+        metadata["AHA"],
+        q=6,
+        labels=False,
+        duplicates="drop",
+    ).to_numpy()
 
     iterations_root = "Iterations_debug/" if args.debug else "Iterations/"
     if args.reset_iterations and os.path.isdir(iterations_root):
@@ -251,12 +260,12 @@ def main() -> None:
 
     min_mean_test_score = DEBUG_MIN_MEAN_TEST_SCORE if args.debug else CV_MIN_MEAN_TEST_SCORE
 
-    rskf = RepeatedStratifiedKFold(
+    skf = StratifiedKFold(
         n_splits=TOTAL_FOLDS,
-        n_repeats=1,
+        shuffle=True,
         random_state=RANDOM_STATE,
     )
-    splits = list(rskf.split(np.empty(metadata.shape[0]), labels))
+    splits = list(skf.split(np.empty(metadata.shape[0]), labels))
 
     for iteration in range(args.iterations):
         train_indexes, test_indexes = splits[iteration]

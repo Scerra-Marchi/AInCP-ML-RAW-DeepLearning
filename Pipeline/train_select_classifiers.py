@@ -66,8 +66,50 @@ def train_select_classifiers(
 
     gridsearch_specs_list = [
         {
+            "name": "LSTM",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False, True],
+            },
+        },
+        {
+            "name": "GRU",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False, True],
+            },
+        },
+        {
+            "name": "RNN",
+            "param_grid": {
+                "optimizer__weight_decay": [0.0, 1e-4],
+                "lr": [3e-4, 1e-3],
+                "max_epochs": [200],
+                "batch_size": [128],
+                "callbacks__early_stopping__patience": [25],
+                "module__hidden_size": [32, 64],
+                "module__num_layers": [1, 2],
+                "module__dropout": [0.0, 0.2],
+                "module__bidirectional": [False],
+                "module__nonlinearity": ["tanh", "relu"],
+            },
+        },
+        {
             "name": "NeuralNet",
-
             "param_grid": [
                 {
                     "optimizer__weight_decay": [1e-3],

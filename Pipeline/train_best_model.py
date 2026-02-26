@@ -5,14 +5,14 @@ import numpy as np
 import joblib as jl
 import torch
 from sklearn.base import clone
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 from create_windows import create_windows
 from skorch_models import save_best_estimator_plots, set_global_determinism
 
 
 def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
     set_global_determinism()
-    X, _, _, y, _ = create_windows(
+    X, _, _, y, _, groups = create_windows(
         data_folder=data_folder,
         metadata=metadata,
         operation_type=method,
@@ -28,6 +28,7 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
     estimator_with_weight = clone(estimator)
     estimator_params = estimator_with_weight.get_params(deep=True)
     y_fit = y.astype(np.float32) if "criterion__pos_weight" in estimator_params else y
+    cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
 
     if "criterion__pos_weight" in estimator_params:
         estimator_with_weight.set_params(
@@ -40,7 +41,7 @@ def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_
     parameter_tuning_method = GridSearchCV(
         estimator_with_weight,
         param_grid,
-        cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+        cv=cv.split(X, y, groups),
         n_jobs=1,
         return_train_score=True,
         verbose=0,

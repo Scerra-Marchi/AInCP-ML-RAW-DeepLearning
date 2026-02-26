@@ -16,6 +16,7 @@ def create_windows(
     y_AHA = []
     y_MACS = []
     y = []
+    subjects = []
 
     per_subject_data = []
 
@@ -77,11 +78,13 @@ def create_windows(
         # healthy -> 1 when AHA is exactly 100, otherwise hemiplegic/not-healthy -> 0.
         target = int(subject_metadata['AHA'] == 100)
         y.extend([target] * n_windows)
+        subjects.extend([int(subject_metadata['subject'])] * n_windows)
 
     return (
         np.vstack(series),
         np.array(y_AHA),
         np.array(y_MACS),
         np.array(y),
-        np.asarray(invalid_bitmap, dtype=np.uint8)
+        np.asarray(invalid_bitmap, dtype=np.uint8),
+        np.array(subjects),
     )
