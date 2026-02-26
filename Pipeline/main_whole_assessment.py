@@ -154,7 +154,9 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
         with open(json_file_path, "r") as json_file:
             data = json.load(json_file)
         r2_list.append(data["Regressor Stats"]["R2 Score"])
-        corrcoef_list.append(data["Best Classifier Stats"]["Correlation Coefficient"])
+        corrcoef_list.append(
+            data["Selected Classifiers Stats"][0]["Correlation Mean Probability vs AHA"]
+        )
 
     if not r2_list or not corrcoef_list:
         return
@@ -163,13 +165,16 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
     average_corr_score = float(np.mean(corrcoef_list))
 
     print(f"The average r2 score for the regressor is: {average_r2_score}")
-    print(f"The average correlation CPI-AHA is: {average_corr_score}")
+    print(
+        "The average correlation CPI-AHA (using the best classifier CPI for each iteration) is: "
+        f"{average_corr_score}"
+    )
 
     results = {
         "R2 Score List": r2_list,
         "Correlation List": corrcoef_list,
         "Average R2 Score": average_r2_score,
-        "Average CPI-AHA Correlation": average_corr_score,
+        "Average CPI-AHA Correlation (Best Classifier CPI per Iteration)": average_corr_score,
     }
 
     with open(os.path.join(iterations_root, "test_results.json"), "w") as file:

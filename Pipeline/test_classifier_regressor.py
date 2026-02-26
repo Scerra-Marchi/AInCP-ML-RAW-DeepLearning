@@ -23,9 +23,13 @@ def test_classifier_regressor(
         window_size=window_size,
         decimation_factor=decimation_factor,
     )
+    if not estimators_list:
+        raise ValueError("No classifiers selected for testing with the current filters.")
+
     model_params_list = [es["estimator"].get_params() for es in estimators_list]
 
     hp_tot_list_list = []
+    hard_pred_tot_list_list = []
     sequence_list = []
     
     for _, subject_metadata in metadata.iterrows():
@@ -36,6 +40,11 @@ def test_classifier_regressor(
         )
         hp_tot_list_list.append(hp_tot)
         sequence_list.append(build_regressor_sequence(y_list, invalid_bitmap, window_size, decimation_factor))
+        invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
+        hard_pred_tot_list_list.append([
+            float((np.asarray(probs, dtype=float)[~invalid_mask] >= 0.5).mean())
+            for probs in y_list
+        ])
 
         #   hp_tot_list_list =                 y =
         #   [[ 95.0, 90.0, 80.0],              [56,
@@ -50,16 +59,26 @@ def test_classifier_regressor(
     #    y.append(subject_metadata['AHA'])
 
     X_seq = np.stack(sequence_list).astype(np.float32)
-    y = np.array(metadata['AHA'].values)
+    y = np.array(metadata['AHA'].values, dtype=float)
 
-    # Organizing data into a dictionary
-    data_corrcoef = {
-        "Method": estimators_specs_list[0]['method'],
-        "Window Size": estimators_specs_list[0]['window_size'],
-        "Model Type": estimators_specs_list[0]['model_type'],
-        "Gridsearch Hash": estimators_specs_list[0]['gridsearch_hash'],
-        "Correlation Coefficient": np.corrcoef(np.array(hp_tot_list_list)[:, 0], y)[0, 1]
-    }
+    hp_tot_array = np.asarray(hp_tot_list_list, dtype=float)
+    hard_pred_tot_array = np.asarray(hard_pred_tot_list_list, dtype=float)
+
+    classifiers_stats = []
+    for i, estimators_specs in enumerate(estimators_specs_list):
+        classifiers_stats.append(
+            {
+                "Classifier Index": i,
+                "Method": estimators_specs["method"],
+                "Window Size": int(estimators_specs["window_size"]),
+                "Decimation Factor": int(estimators_specs["decimation_factor"]),
+                "Model Type": estimators_specs["model_type"],
+                "Gridsearch Hash": str(estimators_specs["gridsearch_hash"]),
+                "Hard Prediction Threshold": 0.5,
+                "Correlation Mean Probability vs AHA": float(np.corrcoef(hp_tot_array[:, i], y)[0, 1]),
+                "Correlation Mean Hard Prediction vs AHA": float(np.corrcoef(hard_pred_tot_array[:, i], y)[0, 1]),
+            }
+        )
 
     model_path = regressor_model_path(
         save_folder=save_folder,
@@ -75,7 +94,7 @@ def test_classifier_regressor(
     }
 
     data_test = {
-        "Best Classifier Stats": data_corrcoef,
+        "Selected Classifiers Stats": classifiers_stats,
         "Regressor Stats": data_regression
     }
 
