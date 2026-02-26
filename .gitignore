@@ -17,8 +17,8 @@ __pycache__/
 # ignore debug iterations outputs (including summary files)
 Pipeline/Iterations_debug/
 
-# ignore timestamp list
-**/timestamps_list
+# ignore generated timestamp cache files (e.g., timestamps_list_decim_3.joblib)
+**/timestamps_list_decim_*.joblib
 
 # ignore Dataset
 Dataset

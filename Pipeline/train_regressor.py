@@ -84,6 +84,7 @@ def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     scorer = make_scorer(_r2_from_sequence_output, greater_is_better=True)
 
+    print("REGRESSOR: START GRID SEARCH")
     grid = GridSearchCV(
         estimator=make_gru_regressor_net(),
         param_grid=param_grid,
@@ -91,7 +92,7 @@ def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
         cv=cv.split(X, strat_labels),
         refit=True,
         n_jobs=1,
-        verbose=2,
+        verbose=0,
     )
     grid.fit(X, y)
     print("REGRESSOR: END GRID SEARCH")
