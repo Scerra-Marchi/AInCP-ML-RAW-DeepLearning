@@ -7,10 +7,11 @@ import torch
 from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from create_windows import create_windows
-from skorch_models import save_best_estimator_plots
+from skorch_models import save_best_estimator_plots, set_global_determinism
 
 
 def train_best_model(data_folder, metadata, gridsearch_folder, estimator, param_grid, method, window_size, decimation_factor):
+    set_global_determinism()
     X, _, _, y, _ = create_windows(
         data_folder=data_folder,
         metadata=metadata,

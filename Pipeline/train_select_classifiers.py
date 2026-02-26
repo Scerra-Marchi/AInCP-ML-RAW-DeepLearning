@@ -12,7 +12,6 @@ import os
 import hashlib
 import pandas as pd
 
-import random
 import torch
 from skorch_models import (
     LSTMSequenceClassifier,
@@ -24,6 +23,7 @@ from skorch_models import (
     TransformerSequenceClassifier,
     make_bce_net,
     make_xgboost_classifier,
+    set_global_determinism,
 )
 from ray.tune import TuneConfig
 
@@ -64,278 +64,87 @@ def train_select_classifiers(
     # 3) train missing combinations (trials early-exit when artifacts already exist),
     # 4) load and aggregate cv_results.csv across the selected grid.
 
-    # NOTE: only lightweight, picklable fields are kept in specs (no estimator objects).
     gridsearch_specs_list = [
         {
-            "name": "LSTM",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False, True],
-            },
-        },
-        {
-            "name": "GRU",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False, True],
-            },
-        },
-        {
-            "name": "RNN",
-            "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False],
-                "module__nonlinearity": ["tanh", "relu"],
-            },
-        },
-        {
             "name": "NeuralNet",
-            # Fine sweep around the best Iteration_0 region (deeper/wider, low regularization).
+
             "param_grid": [
                 {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [2e-4],
-                    "max_epochs": [150],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__hidden_size": [256],
-                    "module__num_layers": [3],
-                    "module__dropout": [0.1],
-                },
-                {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [3e-4],
-                    "max_epochs": [150],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__hidden_size": [256],
-                    "module__num_layers": [4],
-                    "module__dropout": [0.0],
-                },
-                {
-                    "optimizer__weight_decay": [1e-5],
-                    "lr": [2e-4],
-                    "max_epochs": [150],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__hidden_size": [384],
-                    "module__num_layers": [4],
-                    "module__dropout": [0.0],
-                },
-            ],
-        },
-        {
-            "name": "XGBoost",
-            # Coarse sweep: shallow/regularized -> deeper/less regularized.
-            "param_grid": [
-                {
-                    "n_estimators": [100],
-                    "max_depth": [2],
-                    "learning_rate": [0.3],
-                    "subsample": [0.7],
-                    "colsample_bytree": [0.7],
-                    "min_child_weight": [10.0],
-                    "reg_alpha": [1.0],
-                    "reg_lambda": [10.0],
-                    "gamma": [1.0],
-                },
-                {
-                    "n_estimators": [300],
-                    "max_depth": [4],
-                    "learning_rate": [0.1],
-                    "subsample": [0.8],
-                    "colsample_bytree": [0.8],
-                    "min_child_weight": [1.0],
-                    "reg_alpha": [0.1],
-                    "reg_lambda": [3.0],
-                    "gamma": [0.0],
-                },
-                {
-                    "n_estimators": [700],
-                    "max_depth": [8],
-                    "learning_rate": [0.03],
-                    "subsample": [1.0],
-                    "colsample_bytree": [1.0],
-                    "min_child_weight": [1.0],
-                    "reg_alpha": [0.0],
-                    "reg_lambda": [1.0],
-                    "gamma": [0.0],
-                },
-            ],
-        },
-        {
-            "name": "CNN1D",
-            # Iteration_0 collapsed to the same score across all coarse settings; shift regime.
-            "param_grid": [
-                {
-                    "optimizer__weight_decay": [1e-4],
+                    "optimizer__weight_decay": [1e-3],
                     "lr": [1e-3],
-                    "max_epochs": [200],
-                    "batch_size": [64],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__channels": [32],
-                    "module__kernel_size": [5],
-                    "module__dropout": [0.1],
-                },
-                {
-                    "optimizer__weight_decay": [1e-4],
-                    "lr": [5e-4],
-                    "max_epochs": [200],
-                    "batch_size": [64],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__channels": [64],
-                    "module__kernel_size": [7],
-                    "module__dropout": [0.1],
-                },
-                {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [3e-4],
-                    "max_epochs": [200],
+                    "max_epochs": [150],
                     "batch_size": [128],
-                    "callbacks__early_stopping__patience": [30],
-                    "module__channels": [96],
-                    "module__kernel_size": [11],
-                    "module__dropout": [0.0],
-                },
-                {
-                    "optimizer__weight_decay": [1e-5],
-                    "lr": [7e-4],
-                    "max_epochs": [200],
-                    "batch_size": [64],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__channels": [48],
-                    "module__kernel_size": [9],
+                    "callbacks__early_stopping__patience": [20],
+                    "module__hidden_size": [128],
+                    "module__num_layers": [2],
                     "module__dropout": [0.2],
                 },
             ],
         },
         {
             "name": "Transformer",
-            # Fine sweep around the best Iteration_0 region (large model, small patch, low regularization).
             "param_grid": [
                 {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [1e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__d_model": [96],
-                    "module__nhead": [8],
-                    "module__num_layers": [3],
-                    "module__dim_feedforward": [384],
-                    "module__dropout": [0.1],
-                    "module__patch_size": [16],
-                },
-                {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [1e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__d_model": [128],
+                    "optimizer__weight_decay": [1e-4],
+                    "lr": [7e-5],
+                    "max_epochs": [300],
+                    "batch_size": [96],
+                    "callbacks__early_stopping__patience": [40],
+                    "module__d_model": [256],
                     "module__nhead": [8],
                     "module__num_layers": [4],
-                    "module__dim_feedforward": [512],
-                    "module__dropout": [0.0],
-                    "module__patch_size": [16],
-                },
-                {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [2e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__d_model": [128],
-                    "module__nhead": [8],
-                    "module__num_layers": [4],
-                    "module__dim_feedforward": [256],
+                    "module__dim_feedforward": [1024],
                     "module__dropout": [0.1],
                     "module__patch_size": [16],
-                },
+                }
+            ],
+        },
+        {
+            "name": "XGBoost",
+            "param_grid": [
                 {
-                    "optimizer__weight_decay": [1e-5],
-                    "lr": [1e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [30],
-                    "module__d_model": [128],
-                    "module__nhead": [8],
-                    "module__num_layers": [3],
-                    "module__dim_feedforward": [512],
-                    "module__dropout": [0.1],
-                    "module__patch_size": [16],
-                },
+                    "n_estimators": [180],
+                    "max_depth": [2],
+                    "learning_rate": [0.1],
+                    "subsample": [0.85],
+                    "colsample_bytree": [0.7],
+                    "min_child_weight": [4.0],
+                    "reg_alpha": [0.3],
+                    "reg_lambda": [6.0],
+                    "gamma": [0.1],
+                }
+            ],
+        },
+        {
+            "name": "CNN1D",
+            "param_grid": [
+                {
+                    "optimizer__weight_decay": [1e-4],
+                    "lr": [8e-4],
+                    "max_epochs": [450],
+                    "batch_size": [48],
+                    "callbacks__early_stopping__patience": [70],
+                    "module__channels": [320],
+                    "module__kernel_size": [7],
+                    "module__dropout": [0.15],
+                }
             ],
         },
         {
             "name": "Reservoir",
-            # Fine sweep near the high-capacity/high-radius region that performed best in Iteration_0.
             "param_grid": [
                 {
                     "optimizer__weight_decay": [0.0],
-                    "lr": [3e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__reservoir_size": [600],
-                    "module__spectral_radius": [1.1],
-                    "module__leak_rate": [1.0],
-                    "module__input_scaling": [0.7],
-                },
-                {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [3e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__reservoir_size": [800],
-                    "module__spectral_radius": [1.2],
-                    "module__leak_rate": [1.0],
-                    "module__input_scaling": [0.8],
-                },
-                {
-                    "optimizer__weight_decay": [0.0],
                     "lr": [2e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [30],
-                    "module__reservoir_size": [1000],
-                    "module__spectral_radius": [1.3],
-                    "module__leak_rate": [1.0],
-                    "module__input_scaling": [0.9],
-                },
-                {
-                    "optimizer__weight_decay": [1e-5],
-                    "lr": [5e-4],
-                    "max_epochs": [200],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [25],
-                    "module__reservoir_size": [800],
+                    "max_epochs": [360],
+                    "batch_size": [96],
+                    "callbacks__early_stopping__patience": [50],
+                    "module__reservoir_size": [2800],
                     "module__spectral_radius": [1.0],
-                    "module__leak_rate": [1.0],
+                    "module__leak_rate": [0.7],
                     "module__input_scaling": [0.8],
-                },
+                    "module__downsample": [16],
+                }
             ],
         },
     ]
@@ -411,12 +220,8 @@ def train_select_classifiers(
         if _artifacts_exist(gridsearch_folder):
             return
 
-        # Fixed seed for reproducibility across workers.
-        seed = 42
-        random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
+        # Fixed seed for reproducibility across workers and across GridSearchCV candidate ordering.
+        set_global_determinism()
 
         # Import inside the Ray worker after chdir so local imports work.
         from train_best_model import train_best_model

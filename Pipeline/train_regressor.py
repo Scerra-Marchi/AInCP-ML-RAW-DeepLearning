@@ -9,7 +9,7 @@ from sklearn.metrics import r2_score, make_scorer
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from predict_samples import build_estimators_list, predict_samples
-from skorch_models import make_gru_regressor_net, save_best_estimator_plots
+from skorch_models import make_gru_regressor_net, save_best_estimator_plots, set_global_determinism
 
 REGRESSOR_PARAM_GRID = {
     "lr": [1e-1],
@@ -80,6 +80,7 @@ def _r2_from_sequence_output(y_true, y_pred):
 
 def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     """Run 5-fold stratified grid search, save CSV/plots, and return the best estimator."""
+    set_global_determinism()
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     scorer = make_scorer(_r2_from_sequence_output, greater_is_better=True)
 
