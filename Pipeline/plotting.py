@@ -117,20 +117,15 @@ def plot_dashboards(
 
         x = torch.tensor(regressor_sequence, dtype=torch.float32).unsqueeze(0).to(device)
         baseline = x.mean(dim=1, keepdim=True).repeat(1, x.shape[1], 1)
-        prev_return_all_steps = getattr(net, "return_all_steps", None)
-        prev_keepdim_output = getattr(net, "keepdim_output", None)
-        if prev_return_all_steps is not None:
-            net.return_all_steps = False
-        if prev_keepdim_output is not None:
-            net.keepdim_output = True
+        prev_return_last_step = getattr(net, "return_last_step", None)
+        if prev_return_last_step is not None:
+            net.return_last_step = True
         try:
             explainer = shap.GradientExplainer(net, baseline)
             shap_values = explainer.shap_values(x)
         finally:
-            if prev_return_all_steps is not None:
-                net.return_all_steps = prev_return_all_steps
-            if prev_keepdim_output is not None:
-                net.keepdim_output = prev_keepdim_output
+            if prev_return_last_step is not None:
+                net.return_last_step = prev_return_last_step
 
         attr = shap_values[0] if isinstance(shap_values, list) else shap_values
         attr = np.asarray(attr).squeeze()

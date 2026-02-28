@@ -145,13 +145,12 @@ def make_bce_net(module):
     return net
 
 
-def make_gru_regressor_net():
+def make_gru_regressor_net(input_size):
     # Build a fresh skorch regressor; variable hyperparameters are set by train_regressor.py grid search.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return NeuralNetRegressor(
-        module=GRUSequenceClassifier,
-        module__bidirectional=False,
-        module__return_all_steps=True,
+        module=GRUSequenceRegressor,
+        module__input_size=input_size,
         callbacks=[
             ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
             (
@@ -318,16 +317,12 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
-        return_all_steps: bool = False,
-        keepdim_output: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
-        self.return_all_steps = return_all_steps
-        self.keepdim_output = keepdim_output
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
@@ -353,12 +348,44 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
-        if self.return_all_steps:
-            return self.classifier(out)
-        last = self.classifier(out[:, -1])
-        if self.keepdim_output:
-            return last
-        return last.squeeze(-1)
+        return self.classifier(out[:, -1]).squeeze(-1)
+
+
+class GRUSequenceRegressor(nn.Module):
+    def __init__(
+        self,
+        *,
+        input_size: int,
+        hidden_size: int = 64,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        return_last_step: bool = False,
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.return_last_step = return_last_step
+
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            dropout=self.dropout if self.num_layers > 1 else 0.0,
+            batch_first=True,
+        )
+        self.regressor = nn.Linear(hidden_size, 1)
+
+    def forward(self, x):
+        x = x.float()
+        if x.ndim == 2:
+            x = x.unsqueeze(-1)
+
+        self.gru.flatten_parameters()
+        out, _ = self.gru(x)
+        if self.return_last_step:
+            return self.regressor(out[:, -1])
+        return self.regressor(out)
 
 
 def _flatten_windows(X):

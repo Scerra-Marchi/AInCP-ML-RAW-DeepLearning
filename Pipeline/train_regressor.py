@@ -85,8 +85,9 @@ def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
     scorer = make_scorer(_r2_from_sequence_output, greater_is_better=True)
 
     print("REGRESSOR: START GRID SEARCH")
+    input_size = X.shape[-1]
     grid = GridSearchCV(
-        estimator=make_gru_regressor_net(),
+        estimator=make_gru_regressor_net(input_size=input_size),
         param_grid=param_grid,
         scoring=scorer,
         cv=cv.split(X, strat_labels),
