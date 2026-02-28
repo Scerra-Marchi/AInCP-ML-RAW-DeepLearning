@@ -374,6 +374,7 @@ class GRUSequenceRegressor(nn.Module):
             dropout=self.dropout if self.num_layers > 1 else 0.0,
             batch_first=True,
         )
+        self.skip = nn.Linear(input_size, 1)
         self.regressor = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
@@ -383,9 +384,10 @@ class GRUSequenceRegressor(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
+        skip_out = self.skip(x)
         if self.return_last_step:
-            return self.regressor(out[:, -1])
-        return self.regressor(out)
+            return self.regressor(out[:, -1]) + skip_out[:, -1]
+        return self.regressor(out) + skip_out
 
 
 def _flatten_windows(X):
