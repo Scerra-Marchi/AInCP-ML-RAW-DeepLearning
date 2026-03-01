@@ -89,29 +89,25 @@ def _run_iteration(
         decimation_factor=decimation_factor,
     )
 
-    combined_test_stats = os.path.join(save_folder, "combined_test_stats.json")
-    if not os.path.exists(combined_test_stats):
-        print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
-        test_classifier_regressor(
-            data_folder,
-            save_folder=save_folder,
-            metadata=test_metadata.copy(),
-            min_mean_test_score=min_mean_test_score,
-            window_size=window_size,
-            decimation_factor=decimation_factor,
-        )
+    print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
+    test_classifier_regressor(
+        data_folder,
+        save_folder=save_folder,
+        metadata=test_metadata.copy(),
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
 
-    predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
-    if not os.path.exists(predictions_df):
-        print(" ----- CREATING DASHBOARDS ----- ")
-        plot_dashboards(
-            data_folder,
-            save_folder=save_folder,
-            metadata=test_metadata.copy(),
-            min_mean_test_score=min_mean_test_score,
-            window_size=window_size,
-            decimation_factor=decimation_factor,
-        )
+    print(" ----- CREATING DASHBOARDS ----- ")
+    plot_dashboards(
+        data_folder,
+        save_folder=save_folder,
+        metadata=test_metadata.copy(),
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
 
 
 def _iteration_done(save_folder: str) -> bool:
