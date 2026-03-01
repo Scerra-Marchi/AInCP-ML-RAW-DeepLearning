@@ -12,14 +12,14 @@ from predict_samples import build_estimators_list, predict_samples
 from skorch_models import make_gru_regressor_net, save_best_estimator_plots, set_global_determinism
 
 REGRESSOR_PARAM_GRID = {
-    "lr": [1e-1],
+    "lr": [1e-3],
     "max_epochs": [500],
     "batch_size": [16],
-    "module__hidden_size": [48],
-    "module__num_layers": [1],
-    "module__dropout": [0.0],
-    "criterion__late_emphasis": [2.0],
-    "optimizer__weight_decay": [0.0],
+    "module__hidden_size": [1024],
+    "module__num_layers": [3],
+    "module__dropout": [0.1],
+    "criterion__late_emphasis": [2000.0],
+    "optimizer__weight_decay": [1e-4],
     "callbacks__early_stopping__patience": [25],
 }
 
@@ -93,6 +93,7 @@ def _fit_regressor_with_grid_search(X, y, strat_labels, reg_dir, param_grid):
         cv=cv.split(X, strat_labels),
         refit=True,
         n_jobs=1,
+        return_train_score=True,
         verbose=0,
     )
     grid.fit(X, y)

@@ -16,6 +16,7 @@ from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import Callback, EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.metrics import r2_score
 from xgboost import XGBClassifier
 
 DEFAULT_SEED = 42
@@ -51,7 +52,7 @@ class ResetSeedOnTrainBegin(Callback):
         set_global_determinism(self.seed)
 
 
-def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path):
+def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path, yscale=None):
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
@@ -60,6 +61,8 @@ def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_pa
     ax.set_xlabel("Epoch")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
+    if yscale is not None:
+        ax.set_yscale(yscale)
     ax.legend()
     fig.tight_layout()
     fig.savefig(save_path)
@@ -86,6 +89,18 @@ def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
             "Loss During Training",
             os.path.join(stats_folder, "best_estimator_loss.png"),
         )
+        loss_values = history_df[["train_loss", "valid_loss"]].to_numpy(dtype=float)
+        if np.all(loss_values > 0):
+            plot_train_valid(
+                history_df,
+                x,
+                "train_loss",
+                "valid_loss",
+                loss_label,
+                "Loss During Training (Log Scale)",
+                os.path.join(stats_folder, "best_estimator_loss_log.png"),
+                yscale="log",
+            )
     if {"train_f1", "valid_f1"}.issubset(history_df.columns):
         plot_train_valid(
             history_df,
@@ -96,6 +111,26 @@ def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
             "F1 Macro During Training",
             os.path.join(stats_folder, "best_estimator_f1.png"),
         )
+    if {"train_r2", "valid_r2"}.issubset(history_df.columns):
+        plot_train_valid(
+            history_df,
+            x,
+            "train_r2",
+            "valid_r2",
+            "R2 Score",
+            "R2 During Training",
+            os.path.join(stats_folder, "best_estimator_r2.png"),
+        )
+
+
+def _regressor_r2_from_last_step(net, X, y):
+    y_true = np.asarray(y, dtype=float).reshape(-1)
+    y_pred = np.asarray(net.predict(X), dtype=float)
+    if y_pred.ndim == 3:
+        y_pred = y_pred[:, -1, 0]
+    elif y_pred.ndim == 2:
+        y_pred = y_pred[:, -1]
+    return r2_score(y_true, y_pred.reshape(-1))
 
 
 def make_bce_net(module):
@@ -153,6 +188,26 @@ def make_gru_regressor_net(input_size):
         module__input_size=input_size,
         callbacks=[
             ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
+            (
+                "train_r2",
+                EpochScoring(
+                    scoring=_regressor_r2_from_last_step,
+                    on_train=True,
+                    lower_is_better=False,
+                    name="train_r2",
+                    use_caching=False,
+                ),
+            ),
+            (
+                "valid_r2",
+                EpochScoring(
+                    scoring=_regressor_r2_from_last_step,
+                    on_train=False,
+                    lower_is_better=False,
+                    name="valid_r2",
+                    use_caching=False,
+                ),
+            ),
             (
                 "early_stopping",
                 EarlyStopping(
