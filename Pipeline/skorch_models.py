@@ -22,6 +22,11 @@ from xgboost import XGBClassifier
 DEFAULT_SEED = 42
 
 
+def _silent_sink(*args, **kwargs):
+    """Pickle-safe no-op callback sink for skorch logging hooks."""
+    return None
+
+
 def set_global_determinism(seed: int = DEFAULT_SEED) -> None:
     """
     Configure Python/NumPy/PyTorch RNGs and deterministic torch backends.
@@ -135,6 +140,8 @@ def _regressor_r2_from_last_step(net, X, y):
 
 def make_bce_net(module):
     # Build a fresh skorch estimator each time to avoid shared mutable state across trials.
+    # Disable skorch's default PrintLog callback so estimator state does not capture
+    # a possibly patched `print` callable from Ray and remains quiet/picklable.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     net = NeuralNetBinaryClassifier(
         module=module,
@@ -165,6 +172,7 @@ def make_bce_net(module):
                     threshold=1e-4,
                     threshold_mode="rel",
                     lower_is_better=True,
+                    sink=_silent_sink,
                     load_best=True,
                 ),
             )
@@ -175,6 +183,7 @@ def make_bce_net(module):
         train_split=ValidSplit(0.2, stratified=True, random_state=42),
         device=device,
         verbose=0,
+        callbacks__print_log=None,
     )
     net.threshold = 0.5
     return net
@@ -182,6 +191,8 @@ def make_bce_net(module):
 
 def make_gru_regressor_net(input_size):
     # Build a fresh skorch regressor; variable hyperparameters are set by train_regressor.py grid search.
+    # Disable skorch's default PrintLog callback so estimator state does not capture
+    # a possibly patched `print` callable from Ray and remains quiet/picklable.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return NeuralNetRegressor(
         module=GRUSequenceRegressor,
@@ -215,6 +226,7 @@ def make_gru_regressor_net(input_size):
                     threshold=1e-4,
                     threshold_mode="rel",
                     lower_is_better=True,
+                    sink=_silent_sink,
                     load_best=True,
                 ),
             ),
@@ -225,6 +237,7 @@ def make_gru_regressor_net(input_size):
         train_split=ValidSplit(0.2, random_state=42),
         device=device,
         verbose=0,
+        callbacks__print_log=None,
     )
 
 
