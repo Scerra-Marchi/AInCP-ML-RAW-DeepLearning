@@ -1,6 +1,7 @@
 # project-wide ignores
 __pycache__/
 *.log
+.vscode/
 
 # ignore any folders inside each Iteration_* folder
 **/Iteration_*/**
