@@ -113,7 +113,7 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.002, 0.0025],
                 "lr": [6e-4, 7e-4],
-                "max_epochs": [240, 260],
+                "max_epochs": [260],
                 "batch_size": [128],
                 "callbacks__early_stopping__patience": [10],
                 "module__hidden_size": [128, 160],
@@ -156,7 +156,7 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [1e-5],
                 "lr": [5e-4, 6e-4],
-                "max_epochs": [600, 620, 680],
+                "max_epochs": [600],
                 "batch_size": [48],
                 "callbacks__early_stopping__patience": [10],
                 "module__channels": [512, 640],
@@ -169,7 +169,7 @@ def train_select_classifiers(
             "param_grid": {
                 "optimizer__weight_decay": [0.0],
                 "lr": [6e-4, 8e-4],
-                "max_epochs": [240, 260],
+                "max_epochs": [260],
                 "batch_size": [128],
                 "callbacks__early_stopping__patience": [10],
                 "module__reservoir_size": [600, 700],
