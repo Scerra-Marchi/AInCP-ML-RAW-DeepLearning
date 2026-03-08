@@ -87,6 +87,7 @@ def _run_iteration(
         min_mean_test_score=min_mean_test_score,
         window_size=window_size,
         decimation_factor=decimation_factor,
+        regressor_device="cuda:2",
     )
 
     print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
@@ -149,7 +150,7 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
             continue
         with open(json_file_path, "r") as json_file:
             data = json.load(json_file)
-        r2_list.append(data["Regressor Stats"]["R2 Score"])
+        r2_list.append(data["GRU Regressor Stats"]["R2 Score"])
         corrcoef_list.append(
             data["Selected Classifiers Stats"][0]["Correlation Mean Probability vs AHA"]
         )

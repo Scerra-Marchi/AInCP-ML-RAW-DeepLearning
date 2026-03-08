@@ -10,13 +10,11 @@ import os
 import random
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import Callback, EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.metrics import r2_score
 from xgboost import XGBClassifier
 
 DEFAULT_SEED = 42
@@ -128,14 +126,55 @@ def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
         )
 
 
-def _regressor_r2_from_last_step(net, X, y):
-    y_true = np.asarray(y, dtype=float).reshape(-1)
-    y_pred = np.asarray(net.predict(X), dtype=float)
-    if y_pred.ndim == 3:
-        y_pred = y_pred[:, -1, 0]
-    elif y_pred.ndim == 2:
-        y_pred = y_pred[:, -1]
-    return r2_score(y_true, y_pred.reshape(-1))
+def make_regressor_net(module, module_kwargs=None, device=None):
+    module_kwargs = {} if module_kwargs is None else dict(module_kwargs)
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    return NeuralNetRegressor(
+        module=module,
+        callbacks=[
+            ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
+            (
+                "train_r2",
+                EpochScoring(
+                    scoring="r2",
+                    on_train=True,
+                    lower_is_better=False,
+                    name="train_r2",
+                    use_caching=False,
+                ),
+            ),
+            (
+                "valid_r2",
+                EpochScoring(
+                    scoring="r2",
+                    on_train=False,
+                    lower_is_better=False,
+                    name="valid_r2",
+                    use_caching=False,
+                ),
+            ),
+            (
+                "early_stopping",
+                EarlyStopping(
+                    monitor="valid_loss",
+                    threshold=1e-4,
+                    threshold_mode="rel",
+                    lower_is_better=True,
+                    sink=_silent_sink,
+                    load_best=True,
+                ),
+            ),
+        ],
+        criterion=nn.MSELoss,
+        optimizer=torch.optim.AdamW,
+        iterator_train__shuffle=True,
+        train_split=ValidSplit(0.2, random_state=42),
+        device=device,
+        verbose=0,
+        callbacks__print_log=None,
+        **{f"module__{k}": v for k, v in module_kwargs.items()},
+    )
 
 
 def make_bce_net(module):
@@ -187,74 +226,6 @@ def make_bce_net(module):
     )
     net.threshold = 0.5
     return net
-
-
-def make_gru_regressor_net(input_size):
-    # Build a fresh skorch regressor; variable hyperparameters are set by train_regressor.py grid search.
-    # Disable skorch's default PrintLog callback so estimator state does not capture
-    # a possibly patched `print` callable from Ray and remains quiet/picklable.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    return NeuralNetRegressor(
-        module=GRUSequenceRegressor,
-        module__input_size=input_size,
-        callbacks=[
-            ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
-            (
-                "train_r2",
-                EpochScoring(
-                    scoring=_regressor_r2_from_last_step,
-                    on_train=True,
-                    lower_is_better=False,
-                    name="train_r2",
-                    use_caching=False,
-                ),
-            ),
-            (
-                "valid_r2",
-                EpochScoring(
-                    scoring=_regressor_r2_from_last_step,
-                    on_train=False,
-                    lower_is_better=False,
-                    name="valid_r2",
-                    use_caching=False,
-                ),
-            ),
-            (
-                "early_stopping",
-                EarlyStopping(
-                    monitor="valid_loss",
-                    threshold=1e-4,
-                    threshold_mode="rel",
-                    lower_is_better=True,
-                    sink=_silent_sink,
-                    load_best=True,
-                ),
-            ),
-        ],
-        criterion=WeightedSequenceMSELoss,
-        optimizer=torch.optim.AdamW,
-        iterator_train__shuffle=True,
-        train_split=ValidSplit(0.2, random_state=42),
-        device=device,
-        verbose=0,
-        callbacks__print_log=None,
-    )
-
-
-class WeightedSequenceMSELoss(nn.Module):
-    def __init__(self, late_emphasis: float = 2.0):
-        super().__init__()
-        self.late_emphasis = late_emphasis
-
-    def forward(self, y_pred, y_true):
-        n_steps = y_pred.shape[1]
-        # Linearly increase timestep weight from 1.0 (early) to late_emphasis (late).
-        weights = torch.linspace(1.0, float(self.late_emphasis), n_steps, device=y_pred.device, dtype=y_pred.dtype)
-        weights = weights / weights.mean()
-        y_true_seq = y_true.unsqueeze(1).expand(-1, n_steps, -1)
-
-        sq_err = (y_pred - y_true_seq) ** 2
-        return (sq_err * weights.view(1, -1, 1)).mean()
 
 
 class LSTMSequenceClassifier(nn.Module):
@@ -423,7 +394,7 @@ class GRUSequenceRegressor(nn.Module):
     def __init__(
         self,
         *,
-        input_size: int,
+        input_size: int | None = None,
         hidden_size: int = 64,
         num_layers: int = 1,
         dropout: float = 0.0,
@@ -435,20 +406,31 @@ class GRUSequenceRegressor(nn.Module):
         self.dropout = dropout
         self.return_last_step = return_last_step
 
+        self.input_size = input_size
+        self.gru = None
+        self.skip = None
+        self.regressor = nn.Linear(hidden_size, 1)
+
+        if self.input_size is not None:
+            self._build_layers(self.input_size, torch.device("cpu"))
+
+    def _build_layers(self, input_size, device):
         self.gru = nn.GRU(
             input_size=input_size,
             hidden_size=self.hidden_size,
             num_layers=self.num_layers,
             dropout=self.dropout if self.num_layers > 1 else 0.0,
             batch_first=True,
-        )
-        self.skip = nn.Linear(input_size, 1)
-        self.regressor = nn.Linear(hidden_size, 1)
+        ).to(device)
+        self.skip = nn.Linear(input_size, 1).to(device)
 
     def forward(self, x):
         x = x.float()
         if x.ndim == 2:
             x = x.unsqueeze(-1)
+
+        if self.gru is None or self.skip is None:
+            self._build_layers(x.shape[-1], x.device)
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
@@ -456,6 +438,44 @@ class GRUSequenceRegressor(nn.Module):
         if self.return_last_step:
             return self.regressor(out[:, -1]) + skip_out[:, -1]
         return self.regressor(out) + skip_out
+
+
+class FFNNRegressor(nn.Module):
+    def __init__(
+        self,
+        *,
+        hidden_sizes: tuple = (),
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.hidden_sizes = tuple(int(h) for h in hidden_sizes)
+        self.dropout = float(dropout)
+        layers = []
+
+        if self.hidden_sizes:
+            layers.append(nn.LazyLinear(self.hidden_sizes[0]))
+            layers.append(nn.ReLU())
+            if self.dropout > 0:
+                layers.append(nn.Dropout(self.dropout))
+
+            for in_features, out_features in zip(self.hidden_sizes[:-1], self.hidden_sizes[1:]):
+                layers.append(nn.Linear(in_features, out_features))
+                layers.append(nn.ReLU())
+                if self.dropout > 0:
+                    layers.append(nn.Dropout(self.dropout))
+
+            layers.append(nn.Linear(self.hidden_sizes[-1], 1))
+        else:
+            # Linear baseline equivalent with lazy input size inference.
+            layers.append(nn.LazyLinear(1))
+
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = x.float()
+        if x.ndim > 2:
+            x = x.reshape(x.shape[0], -1)
+        return self.network(x)
 
 
 def _flatten_windows(X):

@@ -8,18 +8,40 @@ import numpy as np
 from predict_samples import build_estimators_list, predict_samples
 import matplotlib
 import matplotlib.pyplot as plt
-from train_regressor import regressor_model_path, build_regressor_sequence
+from train_regressor import build_regressor_feature_names, regressor_model_path
 from read_file import read_file
 
 import torch
 import shap
 
 
-def _build_feature_names(n_features, n_estimators):
-    names = [f"classifier_{i}" for i in range(n_estimators)]
-    names += ["invalid_flag", "time_sin", "time_cos"]
-    return names[:n_features]
+def _regressor_timeline_context(
+    *,
+    prep,
+    invalid_mask,
+    window_timestamps,
+    window_size,
+    decimation_factor,
+):
+    prep_mode = getattr(prep, "mode", "cumulative")
+    if prep_mode != "hourly":
+        return window_timestamps, invalid_mask
 
+    fs = getattr(prep, "fs", 80)
+    hour_block_seconds = getattr(prep, "hour_block_seconds", 3600)
+    seconds_per_window = window_size * decimation_factor / fs
+    steps_per_block = max(1, int(round(hour_block_seconds / seconds_per_window)))
+    n_windows = invalid_mask.size
+    n_blocks = int(np.ceil(n_windows / steps_per_block))
+
+    block_timestamps = np.zeros(n_blocks, dtype=float)
+    block_invalid_mask = np.zeros(n_blocks, dtype=bool)
+    for b in range(n_blocks):
+        start = b * steps_per_block
+        end = min(n_windows, (b + 1) * steps_per_block)
+        block_timestamps[b] = float(window_timestamps[start:end].mean())
+        block_invalid_mask[b] = bool(np.all(invalid_mask[start:end]))
+    return block_timestamps, block_invalid_mask
 
 def create_timestamps_list(data_folder, decimation_factor):
     patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv', engine="pyarrow", usecols=['datetime'])
@@ -65,9 +87,11 @@ def plot_dashboards(
         estimators_list=estimators_list,
     )
     regressor = jl.load(model_path)
+    prep = regressor.named_steps["prep"]
+    prep_mode = getattr(prep, "mode", "cumulative")
 
     # --- SHAP setup ---
-    net = regressor.module_
+    net = regressor.named_steps["model"].module_
     net.eval()
     device = next(net.parameters()).device
 
@@ -88,9 +112,21 @@ def plot_dashboards(
             subject_metadata,
         )
 
+        raw_input = {
+            "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in predictions],
+            "invalid_bitmap": np.asarray(invalid_bitmap, dtype=np.uint8),
+        }
+        model_input = np.asarray([raw_input], dtype=object)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
-        regressor_sequence = build_regressor_sequence(predictions, invalid_bitmap, window_size, decimation_factor)
-        window_timestamps = timestamps[::window_size][:regressor_sequence.shape[0]]
+        regressor_sequence = prep.transform(model_input)[0]
+        window_timestamps = timestamps[::window_size][:len(predictions[0])]
+        regressor_timestamps, regressor_invalid_mask = _regressor_timeline_context(
+            prep=prep,
+            invalid_mask=invalid_mask,
+            window_timestamps=window_timestamps,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+        )
 
         mag_D, mag_ND = read_file(
             data_folder,
@@ -104,8 +140,13 @@ def plot_dashboards(
         healthy_percentage.append(hp_tot_list)
         real_aha = subject_metadata['AHA']
 
-        regressor_output = np.asarray(regressor.predict(regressor_sequence[np.newaxis, :, :]), dtype=float)
-        predicted_aha = float(np.clip(regressor_output[0, -1, 0], 0, 100))
+        regressor_output = np.asarray(regressor.predict(model_input), dtype=float)
+        if regressor_output.ndim == 3:
+            predicted_aha = float(np.clip(regressor_output[0, -1, 0], 0, 100))
+        elif regressor_output.ndim == 2:
+            predicted_aha = float(np.clip(regressor_output[0, -1], 0, 100))
+        else:
+            predicted_aha = float(np.clip(regressor_output[0], 0, 100))
         predicted_aha_list.append(predicted_aha)
 
         print('Patient ', subject)
@@ -135,7 +176,8 @@ def plot_dashboards(
         abs_attr = np.abs(attr)
         time_importance = np.mean(abs_attr, axis=1)
 
-        feature_names = _build_feature_names(
+        feature_names = build_regressor_feature_names(
+            mode=prep_mode,
             n_features=regressor_sequence.shape[1],
             n_estimators=len(predictions),
         )
@@ -269,9 +311,23 @@ def plot_dashboards(
         plt.close()
 
         ##################### PREDICTED AHA PLOT ####################
-        aha_timeline = np.clip(regressor_output[0, :, 0], 0, 100)
+        prev_return_last_step = getattr(net, "return_last_step", None)
+        if prev_return_last_step is not None:
+            net.return_last_step = False
+        try:
+            regressor_output_seq = np.asarray(regressor.predict(model_input), dtype=float)
+        finally:
+            if prev_return_last_step is not None:
+                net.return_last_step = prev_return_last_step
+
+        if regressor_output_seq.ndim == 3:
+            aha_timeline = np.clip(regressor_output_seq[0, :, 0], 0, 100)
+        elif regressor_output_seq.ndim == 2:
+            aha_timeline = np.clip(regressor_output_seq[0], 0, 100)
+        else:
+            aha_timeline = np.clip(np.asarray(regressor_output_seq).reshape(-1), 0, 100)
         aha_timeline_valid_only = aha_timeline.copy()
-        aha_timeline_valid_only[invalid_mask] = np.nan
+        aha_timeline_valid_only[regressor_invalid_mask] = np.nan
 
         plt.grid()
         ax = plt.gca()
@@ -280,7 +336,7 @@ def plot_dashboards(
         plt.axhline(y = real_aha, color = 'b', linestyle = '--', linewidth= 1, label='AHA')
         plt.xlabel("Orario")
         plt.ylabel("Home-AHA")
-        plt.plot(window_timestamps, aha_timeline_valid_only, c='green')
+        plt.plot(regressor_timestamps, aha_timeline_valid_only, c='green')
         plt.legend()
         plt.gcf().set_size_inches(8, 2)
         plt.tight_layout()
