@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+from tempfile import TemporaryDirectory
 
 import joblib as jl
 import numpy as np
@@ -478,32 +479,38 @@ def _fit_pipeline_with_grid_search(
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
     print(f"{model_label}: START GRID SEARCH")
-    grid = GridSearchCV(
-        estimator=estimator,
-        param_grid=param_grid,
-        scoring="r2",
-        cv=cv.split(X_raw, strat_labels),
-        refit=True,
-        n_jobs=1,
-        return_train_score=True,
-        verbose=0,
-    )
-    grid.fit(X_raw, y)
+    with TemporaryDirectory(prefix="pipeline_cache_", dir=model_dir) as cache_dir:
+        estimator.set_params(memory=Memory(location=cache_dir, verbose=0))
+        grid = GridSearchCV(
+            estimator=estimator,
+            param_grid=param_grid,
+            scoring="r2",
+            cv=cv.split(X_raw, strat_labels),
+            refit=True,
+            n_jobs=1,
+            return_train_score=True,
+            verbose=0,
+        )
+        grid.fit(X_raw, y)
+        best_estimator = grid.best_estimator_
+        best_estimator.set_params(memory=None)
+        cv_results = pd.DataFrame(grid.cv_results_)
+
     print(f"{model_label}: END GRID SEARCH")
     print(f"{model_label}: best_score_ =", float(grid.best_score_))
     print(f"{model_label}: best_params_ =", grid.best_params_)
 
     os.makedirs(model_dir, exist_ok=True)
-    pd.DataFrame(grid.cv_results_).sort_values(by="rank_test_score").to_csv(
+    cv_results.sort_values(by="rank_test_score").to_csv(
         os.path.join(model_dir, "gridsearch_results.csv"),
         index=False,
     )
     save_best_estimator_plots(
-        grid.best_estimator_.named_steps["model"],
+        best_estimator.named_steps["model"],
         model_dir,
         loss_label=loss_label,
     )
-    return grid.best_estimator_
+    return best_estimator
 
 
 def _build_gru_pipeline(model_dir, window_size, decimation_factor, regressor_device):
@@ -528,8 +535,7 @@ def _build_gru_pipeline(model_dir, window_size, decimation_factor, regressor_dev
                     device=regressor_device,
                 ),
             ),
-        ],
-        memory=Memory(location=os.path.join(model_dir, "pipeline_cache"), verbose=0),
+        ]
     )
 
 
@@ -540,8 +546,7 @@ def _build_ffnn_pipeline(model_dir, window_size, decimation_factor, regressor_de
             ("prep", FinalStatsPreprocessor()),
             ("scaler", StandardScaler()),
             ("model", make_regressor_net(module=FFNNRegressor, device=regressor_device)),
-        ],
-        memory=Memory(location=os.path.join(model_dir, "pipeline_cache"), verbose=0),
+        ]
     )
 
 
