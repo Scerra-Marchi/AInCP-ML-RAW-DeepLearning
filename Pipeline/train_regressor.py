@@ -15,6 +15,7 @@ from predict_samples import build_estimators_list, predict_samples
 from skorch_models import (
     FFNNRegressor,
     GRUSequenceRegressor,
+    SequenceStandardScaler,
     make_regressor_net,
     save_best_estimator_plots,
     set_global_determinism,
@@ -446,21 +447,6 @@ class SequencePreprocessor(BaseEstimator, TransformerMixin):
             for sample in X
         ]
         return np.stack(sequences).astype(np.float32)
-
-
-class SequenceStandardScaler(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        self.scaler = StandardScaler()
-
-    def fit(self, X, y=None):
-        X = np.asarray(X, dtype=np.float32)
-        self.scaler.fit(X.reshape(-1, X.shape[-1]))
-        return self
-
-    def transform(self, X):
-        X = np.asarray(X, dtype=np.float32)
-        X_scaled = self.scaler.transform(X.reshape(-1, X.shape[-1]))
-        return X_scaled.reshape(X.shape).astype(np.float32)
 
 
 class FinalStatsPreprocessor(BaseEstimator, TransformerMixin):

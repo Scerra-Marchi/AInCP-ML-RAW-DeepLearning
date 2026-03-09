@@ -14,7 +14,8 @@ from torch import nn
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import Callback, EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 DEFAULT_SEED = 42
@@ -126,6 +127,34 @@ def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
         )
 
 
+class SequenceStandardScaler(BaseEstimator, TransformerMixin):
+    def __init__(self):
+        self.scaler = StandardScaler()
+
+    def _ensure_channel_axis(self, X):
+        X = np.asarray(X, dtype=np.float32)
+        squeezed = False
+        if X.ndim == 2:
+            X = X[..., None]
+            squeezed = True
+        if X.ndim != 3:
+            raise ValueError(f"SequenceStandardScaler expects 2D or 3D input, got shape {X.shape}.")
+        return X, squeezed
+
+    def fit(self, X, y=None):
+        X, _ = self._ensure_channel_axis(X)
+        self.scaler.fit(X.reshape(-1, X.shape[-1]))
+        return self
+
+    def transform(self, X):
+        X, squeezed = self._ensure_channel_axis(X)
+        X_scaled = self.scaler.transform(X.reshape(-1, X.shape[-1]))
+        X_scaled = X_scaled.reshape(X.shape).astype(np.float32)
+        if squeezed:
+            X_scaled = X_scaled[..., 0]
+        return X_scaled
+
+
 def make_regressor_net(module, module_kwargs=None, device=None):
     module_kwargs = {} if module_kwargs is None else dict(module_kwargs)
     if device is None:
@@ -178,6 +207,9 @@ def make_regressor_net(module, module_kwargs=None, device=None):
 
 
 def make_bce_net(module):
+    if module is XGBoostSequenceClassifier:
+        return XGBoostSequenceClassifier()
+
     # Build a fresh skorch estimator each time to avoid shared mutable state across trials.
     # Disable skorch's default PrintLog callback so estimator state does not capture
     # a possibly patched `print` callable from Ray and remains quiet/picklable.
@@ -551,10 +583,6 @@ class XGBoostSequenceClassifier(BaseEstimator, ClassifierMixin):
     def predict(self, X):
         X = _flatten_windows(X)
         return self.model_.predict(X)
-
-
-def make_xgboost_classifier():
-    return XGBoostSequenceClassifier()
 
 
 class Conv1DSequenceClassifier(nn.Module):
