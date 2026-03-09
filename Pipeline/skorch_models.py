@@ -11,6 +11,7 @@ import random
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import Callback, EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
