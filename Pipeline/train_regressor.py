@@ -26,7 +26,9 @@ from skorch_models import (
 
 CUMULATIVE_POSITIVE_THRESHOLD = 0.5
 CUMULATIVE_QUANTILE_HIST_BINS = 128
+FOUR_MINUTES_BLOCK_SECONDS = 4 * 60
 HOUR_BLOCK_SECONDS = 3600
+WHOLE_WEEK_BLOCK_SECONDS = 6 * 24 * HOUR_BLOCK_SECONDS
 RAW_WINDOW_STD_TOL = 0.005
 SENSOR_FEATURE_EPS = 1e-6
 SENSOR_WINDOW_FEATURE_KEYS = (
@@ -57,14 +59,13 @@ GRU_MODEL_PARAM_GRID = {
     "model__callbacks__early_stopping__patience": [25],
 }
 GRU_PARAM_GRID = [
-    # {**GRU_MODEL_PARAM_GRID, "prep__mode": ["raw"]},
-    # {**GRU_MODEL_PARAM_GRID, "prep__mode": ["cumulative"]},
     {
         **GRU_MODEL_PARAM_GRID,
-        "prep__mode": ["hourly"],
         "prep__hour_block_seconds": [
+            FOUR_MINUTES_BLOCK_SECONDS,
             HOUR_BLOCK_SECONDS,
             24 * HOUR_BLOCK_SECONDS,
+            WHOLE_WEEK_BLOCK_SECONDS,
         ],
     },
 ]
@@ -127,23 +128,6 @@ def ffnn_model_path(save_folder, estimators_list):
     )
 
 
-def _raw_feature_names(n_estimators):
-    names = [f"classifier_{i}" for i in range(n_estimators)]
-    names += ["invalid_flag", "time_sin", "time_cos"]
-    return names
-
-
-def _cumulative_feature_names(n_estimators):
-    names = [f"classifier_{i}" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cummean" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumstd" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumq25" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumq75" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumposrate" for i in range(n_estimators)]
-    names += ["invalid_flag", "cum_valid_fraction", "time_sin", "time_cos"]
-    return names
-
-
 def _hourly_feature_names(n_estimators):
     names = [f"classifier_{i}_hourmean" for i in range(n_estimators)]
     names += [f"classifier_{i}_hourstd" for i in range(n_estimators)]
@@ -175,8 +159,6 @@ def _final_stats_feature_names(n_estimators):
 
 
 _FEATURE_NAME_BUILDERS = {
-    "raw": _raw_feature_names,
-    "cumulative": _cumulative_feature_names,
     "hourly": _hourly_feature_names,
     "final_stats": _final_stats_feature_names,
 }
@@ -263,69 +245,6 @@ def build_regressor_sample(
     return sample
 
 
-def _compute_cumulative_quantiles_histogram(probs_matrix, valid_mask, n_bins):
-    n_windows, n_estimators = probs_matrix.shape
-    cum_q25 = np.full((n_windows, n_estimators), 0.5, dtype=np.float32)
-    cum_q75 = np.full((n_windows, n_estimators), 0.5, dtype=np.float32)
-    valid_int = valid_mask.astype(np.int32)
-    idx_rows = np.arange(n_windows)
-
-    for est_idx in range(n_estimators):
-        values = probs_matrix[:, est_idx]
-        bin_idx = np.clip((values * n_bins).astype(np.int32), 0, n_bins - 1)
-        hist = np.zeros((n_windows, n_bins), dtype=np.int32)
-        hist[idx_rows, bin_idx] = valid_int
-        cum_hist = np.cumsum(hist, axis=0)
-
-        counts = cum_hist.sum(axis=1)
-        has_counts = counts > 0
-        if not np.any(has_counts):
-            continue
-
-        cum_hist_valid = cum_hist[has_counts]
-        q25_target = np.ceil(0.25 * counts[has_counts]).astype(np.int32)
-        q75_target = np.ceil(0.75 * counts[has_counts]).astype(np.int32)
-        q25_bins = (cum_hist_valid >= q25_target[:, None]).argmax(axis=1)
-        q75_bins = (cum_hist_valid >= q75_target[:, None]).argmax(axis=1)
-
-        cum_q25[has_counts, est_idx] = (q25_bins.astype(np.float32) + 0.5) / float(n_bins)
-        cum_q75[has_counts, est_idx] = (q75_bins.astype(np.float32) + 0.5) / float(n_bins)
-
-    return cum_q25, cum_q75
-
-
-def _compute_cumulative_summary_features(probs_matrix, valid_mask):
-    n_windows, n_estimators = probs_matrix.shape
-    valid_col = valid_mask.astype(np.float32).reshape(-1, 1)
-    valid_probs = probs_matrix * valid_col
-
-    cum_count = np.cumsum(valid_col, axis=0)
-    cum_sum = np.cumsum(valid_probs, axis=0)
-    cum_sq_sum = np.cumsum(valid_probs * valid_probs, axis=0)
-    cum_pos_sum = np.cumsum((probs_matrix >= CUMULATIVE_POSITIVE_THRESHOLD).astype(np.float32) * valid_col, axis=0)
-
-    cum_mean = np.full((n_windows, n_estimators), 0.5, dtype=np.float32)
-    np.divide(cum_sum, cum_count, out=cum_mean, where=cum_count > 0)
-
-    second_moment = np.zeros((n_windows, n_estimators), dtype=np.float32)
-    np.divide(cum_sq_sum, cum_count, out=second_moment, where=cum_count > 0)
-    cum_var = np.maximum(second_moment - cum_mean * cum_mean, 0.0)
-    cum_std = np.sqrt(cum_var, dtype=np.float32)
-    cum_std[cum_count[:, 0] == 0] = 0.0
-
-    cum_pos_rate = np.full((n_windows, n_estimators), 0.5, dtype=np.float32)
-    np.divide(cum_pos_sum, cum_count, out=cum_pos_rate, where=cum_count > 0)
-
-    cum_q25, cum_q75 = _compute_cumulative_quantiles_histogram(
-        probs_matrix,
-        valid_mask,
-        n_bins=CUMULATIVE_QUANTILE_HIST_BINS,
-    )
-
-    valid_fraction = cum_count / np.arange(1, n_windows + 1, dtype=np.float32).reshape(-1, 1)
-    return cum_mean, cum_std, cum_q25, cum_q75, cum_pos_rate, valid_fraction
-
-
 def _compute_final_quantiles_histogram(probs_matrix, valid_mask, n_bins):
     _, n_estimators = probs_matrix.shape
     q25 = np.full(n_estimators, 0.5, dtype=np.float32)
@@ -380,58 +299,6 @@ def _compute_final_summary_features(probs_matrix, valid_mask):
 
     valid_fraction = np.array([valid_mask.mean()], dtype=np.float32)
     return np.hstack((mean, std, q25, q75, pos_rate, valid_fraction))
-
-
-def _build_raw_sequence(
-    probs_matrix,
-    invalid,
-    sensor_window_features,
-    window_size,
-    decimation_factor,
-    fs,
-    hour_block_seconds,
-):
-    del sensor_window_features, hour_block_seconds
-    time_sin, time_cos = _time_features(probs_matrix.shape[0], window_size, decimation_factor, fs)
-    invalid_col = invalid.astype(np.float32).reshape(-1, 1)
-    return np.hstack((probs_matrix, invalid_col, time_sin, time_cos)).astype(np.float32)
-
-
-def _build_cumulative_sequence(
-    probs_matrix,
-    invalid,
-    sensor_window_features,
-    window_size,
-    decimation_factor,
-    fs,
-    hour_block_seconds,
-):
-    del sensor_window_features, hour_block_seconds
-    valid_mask = ~invalid.astype(bool)
-    (
-        cum_mean,
-        cum_std,
-        cum_q25,
-        cum_q75,
-        cum_pos_rate,
-        valid_fraction,
-    ) = _compute_cumulative_summary_features(probs_matrix, valid_mask)
-    time_sin, time_cos = _time_features(probs_matrix.shape[0], window_size, decimation_factor, fs)
-    invalid_col = invalid.astype(np.float32).reshape(-1, 1)
-    return np.hstack(
-        (
-            probs_matrix,
-            cum_mean,
-            cum_std,
-            cum_q25,
-            cum_q75,
-            cum_pos_rate,
-            invalid_col,
-            valid_fraction,
-            time_sin,
-            time_cos,
-        )
-    ).astype(np.float32)
 
 
 def _build_hourly_sequence(
@@ -508,14 +375,6 @@ def _build_hourly_sequence(
         )
     ).astype(np.float32)
 
-
-_SEQUENCE_BUILDERS = {
-    "raw": _build_raw_sequence,
-    "cumulative": _build_cumulative_sequence,
-    "hourly": _build_hourly_sequence,
-}
-
-
 def build_regressor_sequence(
     predictions_list,
     invalid_bitmap,
@@ -523,12 +382,11 @@ def build_regressor_sequence(
     window_size,
     decimation_factor,
     fs=80,
-    mode="cumulative",
     hour_block_seconds=HOUR_BLOCK_SECONDS,
 ):
     probs_matrix = np.column_stack([np.asarray(pred, dtype=np.float32) for pred in predictions_list])
     invalid = np.asarray(invalid_bitmap, dtype=np.uint8).reshape(-1)
-    return _SEQUENCE_BUILDERS[mode](
+    return _build_hourly_sequence(
         probs_matrix,
         invalid,
         sensor_window_features,
@@ -545,13 +403,12 @@ class SequencePreprocessor(BaseEstimator, TransformerMixin):
         window_size,
         decimation_factor,
         fs=80,
-        mode="cumulative",
         hour_block_seconds=HOUR_BLOCK_SECONDS,
     ):
         self.window_size = window_size
         self.decimation_factor = decimation_factor
         self.fs = fs
-        self.mode = mode
+        self.mode = "hourly"
         self.hour_block_seconds = hour_block_seconds
 
     def fit(self, X, y=None):
@@ -566,7 +423,6 @@ class SequencePreprocessor(BaseEstimator, TransformerMixin):
                 self.window_size,
                 self.decimation_factor,
                 fs=self.fs,
-                mode=self.mode,
                 hour_block_seconds=self.hour_block_seconds,
             )
             for sample in X
@@ -645,7 +501,6 @@ def _build_gru_pipeline(model_dir, window_size, decimation_factor, regressor_dev
                 SequencePreprocessor(
                     window_size=window_size,
                     decimation_factor=decimation_factor,
-                    mode="cumulative",
                 ),
             ),
             ("scaler", SequenceStandardScaler()),

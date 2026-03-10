@@ -27,7 +27,7 @@ def _regressor_timeline_context(
     window_size,
     decimation_factor,
 ):
-    prep_mode = getattr(prep, "mode", "cumulative")
+    prep_mode = getattr(prep, "mode", "hourly")
     if prep_mode != "hourly":
         return window_timestamps, invalid_mask
 
@@ -92,7 +92,7 @@ def plot_dashboards(
     )
     regressor = jl.load(model_path)
     prep = regressor.named_steps["prep"]
-    prep_mode = getattr(prep, "mode", "cumulative")
+    prep_mode = getattr(prep, "mode", "hourly")
 
     # --- SHAP setup ---
     net = regressor.named_steps["model"].module_
