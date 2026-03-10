@@ -14,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 
 from predict_samples import build_estimators_list, predict_samples
 from read_file import read_file
+from signal_features import compute_window_sensor_features
 from skorch_models import (
     FFNNRegressor,
     GRUSequenceRegressor,
@@ -28,20 +29,21 @@ CUMULATIVE_QUANTILE_HIST_BINS = 128
 HOUR_BLOCK_SECONDS = 3600
 RAW_WINDOW_STD_TOL = 0.005
 SENSOR_FEATURE_EPS = 1e-6
+SENSOR_WINDOW_FEATURE_KEYS = (
+    "enmo_mean_d",
+    "enmo_mean_nd",
+    "enmo_diff",
+    "enmo_log_ratio",
+    "signed_ai_enmo",
+    "bilateral_enmo_mean",
+    "jerk_mean_d",
+    "jerk_mean_nd",
+)
 PREPROCESSING_CONFIG = {
     "cumulative_positive_threshold": CUMULATIVE_POSITIVE_THRESHOLD,
     "cumulative_quantile_hist_bins": CUMULATIVE_QUANTILE_HIST_BINS,
     "gru_sequence_scaling": True,
-    "hourly_sensor_features": [
-        "enmo_mean_d",
-        "enmo_mean_nd",
-        "enmo_diff",
-        "enmo_log_ratio",
-        "signed_ai_enmo",
-        "bilateral_enmo_mean",
-        "jerk_mean_d",
-        "jerk_mean_nd",
-    ],
+    "hourly_sensor_features": list(SENSOR_WINDOW_FEATURE_KEYS),
 }
 
 GRU_MODEL_PARAM_GRID = {
@@ -192,17 +194,7 @@ def _time_features(n_steps, window_size, decimation_factor, fs):
     return np.sin(angle).reshape(-1, 1), np.cos(angle).reshape(-1, 1)
 
 
-def _log_ratio(primary, secondary):
-    return np.log(primary + SENSOR_FEATURE_EPS) - np.log(secondary + SENSOR_FEATURE_EPS)
-
-
-def _window_invalid_bitmap(D_w, ND_w, std_tol=RAW_WINDOW_STD_TOL):
-    combined = np.concatenate((D_w, ND_w), axis=2)
-    std_features = np.std(combined, axis=1)
-    return np.all(std_features < std_tol, axis=1)
-
-
-def _build_sensor_window_features(data_folder, subject_metadata, window_size, decimation_factor, input_type="week"):
+def _read_windowed_raw_signals(data_folder, subject_metadata, window_size, decimation_factor, input_type="week"):
     subject = int(subject_metadata["subject"])
     D, ND = read_file(
         data_folder=data_folder,
@@ -215,33 +207,60 @@ def _build_sensor_window_features(data_folder, subject_metadata, window_size, de
     n_windows = len(D) // window_size
     D_w = D.reshape(n_windows, window_size, 3)
     ND_w = ND.reshape(n_windows, window_size, 3)
+    return D_w, ND_w
 
-    mag_d = np.linalg.norm(D_w, axis=2).astype(np.float32)
-    mag_nd = np.linalg.norm(ND_w, axis=2).astype(np.float32)
-    enmo_d = np.maximum(mag_d - 1.0, 0.0)
-    enmo_nd = np.maximum(mag_nd - 1.0, 0.0)
-    jerk_d = np.abs(np.diff(enmo_d, axis=1, prepend=enmo_d[:, :1]))
-    jerk_nd = np.abs(np.diff(enmo_nd, axis=1, prepend=enmo_nd[:, :1]))
 
-    enmo_mean_d = enmo_d.mean(axis=1).astype(np.float32)
-    enmo_mean_nd = enmo_nd.mean(axis=1).astype(np.float32)
-    enmo_diff = (enmo_mean_d - enmo_mean_nd).astype(np.float32)
-    bilateral_enmo_mean = (enmo_mean_d + enmo_mean_nd).astype(np.float32)
-    sensor_window_features = {
-        "enmo_mean_d": enmo_mean_d,
-        "enmo_mean_nd": enmo_mean_nd,
-        "enmo_diff": enmo_diff,
-        "enmo_log_ratio": _log_ratio(enmo_mean_d, enmo_mean_nd).astype(np.float32),
-        "signed_ai_enmo": np.divide(
-            enmo_diff,
-            bilateral_enmo_mean + SENSOR_FEATURE_EPS,
-        ).astype(np.float32),
-        "bilateral_enmo_mean": bilateral_enmo_mean,
-        "jerk_mean_d": jerk_d.mean(axis=1).astype(np.float32),
-        "jerk_mean_nd": jerk_nd.mean(axis=1).astype(np.float32),
+def _compute_sensor_window_features(data_folder, subject_metadata, window_size, decimation_factor, input_type="week"):
+    D_w, ND_w = _read_windowed_raw_signals(
+        data_folder,
+        subject_metadata,
+        window_size,
+        decimation_factor,
+        input_type=input_type,
+    )
+    return compute_window_sensor_features(
+        D_w,
+        ND_w,
+        epsilon=SENSOR_FEATURE_EPS,
+        std_tol=RAW_WINDOW_STD_TOL,
+    )
+
+
+def build_regressor_sample(
+    data_folder,
+    estimators_list,
+    subject_metadata,
+    *,
+    input_type="week",
+    predictions_list=None,
+    invalid_bitmap=None,
+):
+    if predictions_list is None or invalid_bitmap is None:
+        predictions_list, _, invalid_bitmap = predict_samples(
+            data_folder,
+            estimators_list,
+            subject_metadata,
+        )
+    sensor_window_features, sensor_invalid_bitmap = _compute_sensor_window_features(
+        data_folder,
+        subject_metadata,
+        estimators_list[0]["window_size"],
+        estimators_list[0]["decimation_factor"],
+        input_type=input_type,
+    )
+    invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
+    if invalid_bitmap.shape != sensor_invalid_bitmap.shape or not np.array_equal(
+        invalid_bitmap,
+        sensor_invalid_bitmap,
+    ):
+        raise ValueError("Sensor-derived window features are misaligned with predict_samples invalid_bitmap.")
+
+    sample = {
+        "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in predictions_list],
+        "invalid_bitmap": invalid_bitmap,
+        "sensor_window_features": sensor_window_features,
     }
-    invalid_bitmap = _window_invalid_bitmap(D_w, ND_w).astype(np.uint8)
-    return sensor_window_features, invalid_bitmap
+    return sample
 
 
 def _compute_cumulative_quantiles_histogram(probs_matrix, valid_mask, n_bins):
@@ -435,21 +454,11 @@ def _build_hourly_sequence(
     block_q25 = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_q75 = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_pos = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
-    block_sensor = np.zeros((n_blocks, 8), dtype=np.float32)
+    block_sensor = np.zeros((n_blocks, len(SENSOR_WINDOW_FEATURE_KEYS)), dtype=np.float32)
     block_valid_fraction = np.zeros((n_blocks, 1), dtype=np.float32)
     block_center_seconds = np.zeros(n_blocks, dtype=np.float32)
-    sensor_keys = (
-        "enmo_mean_d",
-        "enmo_mean_nd",
-        "enmo_diff",
-        "enmo_log_ratio",
-        "signed_ai_enmo",
-        "bilateral_enmo_mean",
-        "jerk_mean_d",
-        "jerk_mean_nd",
-    )
     sensor_matrix = np.column_stack(
-        [np.asarray(sensor_window_features[key], dtype=np.float32) for key in sensor_keys]
+        [np.asarray(sensor_window_features[key], dtype=np.float32) for key in SENSOR_WINDOW_FEATURE_KEYS]
     )
 
     for b in range(n_blocks):
@@ -698,30 +707,13 @@ def train_regressor(
     raw_samples = []
     for _, subject_metadata in metadata.iterrows():
         print("REGRESSOR: PATIENT", subject_metadata["subject"], "BEGIN")
-        estimator_probs_list, _, invalid_bitmap = predict_samples(
-            data_folder,
-            estimators_list,
-            subject_metadata,
-        )
-        sensor_window_features, sensor_invalid_bitmap = _build_sensor_window_features(
-            data_folder,
-            subject_metadata,
-            window_size,
-            decimation_factor,
-            input_type="week",
-        )
-        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
-        if invalid_bitmap.shape != sensor_invalid_bitmap.shape or not np.array_equal(
-            invalid_bitmap,
-            sensor_invalid_bitmap,
-        ):
-            raise ValueError("Sensor-derived window features are misaligned with predict_samples invalid_bitmap.")
         raw_samples.append(
-            {
-                "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in estimator_probs_list],
-                "invalid_bitmap": invalid_bitmap,
-                "sensor_window_features": sensor_window_features,
-            }
+            build_regressor_sample(
+                data_folder,
+                estimators_list,
+                subject_metadata,
+                input_type="week",
+            )
         )
         print("REGRESSOR: PATIENT", subject_metadata["subject"], "END")
 

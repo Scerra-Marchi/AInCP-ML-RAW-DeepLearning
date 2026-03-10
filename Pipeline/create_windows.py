@@ -1,6 +1,6 @@
 import numpy as np
-from elaborate_magnitude import elaborate_magnitude
 from read_file import read_file
+from signal_features import build_signal_features, compute_invalid_bitmap
 
 
 def create_windows(
@@ -54,17 +54,12 @@ def create_windows(
         n_windows = D_w.shape[0]
 
         # Combiniamo le due matrici in shape [windows, WINDOW_SIZE, 6]
-        combined = np.concatenate([D_w, ND_w], axis=2)
-
-        # Calcola std per ciascuna finestra e ciascuna feature
-        std_features = np.std(combined, axis=1)  # shape [windows, 6]
-
         # Una finestra è non significativa se **tutte le feature** hanno std < soglia
-        invalid_windows = np.all(std_features < std_tol, axis=1)
+        invalid_windows = compute_invalid_bitmap(D_w, ND_w, std_tol=std_tol)
         invalid_bitmap.extend(invalid_windows.tolist())
 
         # Costruisci features
-        features = elaborate_magnitude(
+        features = build_signal_features(
             operation_type,
             D_w,
             ND_w

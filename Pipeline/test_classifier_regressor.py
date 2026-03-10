@@ -5,7 +5,7 @@ import joblib as jl
 from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
 from train_regressor import (
-    _build_sensor_window_features,
+    build_regressor_sample,
     ffnn_model_path,
     regressor_model_path,
 )
@@ -42,27 +42,18 @@ def test_classifier_regressor(
             estimators_list,
             subject_metadata,
         )
-        sensor_window_features, sensor_invalid_bitmap = _build_sensor_window_features(
-            data_folder,
-            subject_metadata,
-            window_size,
-            decimation_factor,
-            input_type="week",
-        )
-        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
-        if invalid_bitmap.shape != sensor_invalid_bitmap.shape or not np.array_equal(
-            invalid_bitmap,
-            sensor_invalid_bitmap,
-        ):
-            raise ValueError("Sensor-derived window features are misaligned with predict_samples invalid_bitmap.")
         hp_tot_list_list.append(hp_tot)
         raw_inputs.append(
-            {
-                "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in y_list],
-                "invalid_bitmap": invalid_bitmap,
-                "sensor_window_features": sensor_window_features,
-            }
+            build_regressor_sample(
+                data_folder,
+                estimators_list,
+                subject_metadata,
+                input_type="week",
+                predictions_list=y_list,
+                invalid_bitmap=invalid_bitmap,
+            )
         )
+        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         hard_pred_tot_list_list.append([
             float((np.asarray(probs, dtype=float)[~invalid_mask] >= 0.5).mean())
