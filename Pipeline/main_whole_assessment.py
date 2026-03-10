@@ -22,7 +22,18 @@ DATA_FOLDER = "../Dataset/"
 WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
 DECIMATION_FACTOR = 3
 MODEL_NAMES = ["Transformer"]
-METHODS = ["raw", "raw_enmo_ai_ratio_jerk", "raw_enmo", "raw_ai", "raw_ratio", "raw_jerk", "enmo_asymmetry"]
+METHODS = [
+    "raw",
+    "raw_enmo_ai_ratio_jerk",
+    "raw_enmo",
+    "raw_ai",
+    "raw_ratio",
+    "raw_jerk",
+    "enmo_ai",
+    "enmo_jerk",
+    "enmo_asymmetry",
+    "enmo_asymmetry_jerk",
+]
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
 # With f1_macro scoring, values are in [0, 1], and higher is better.
@@ -30,7 +41,7 @@ DEFAULT_ITERATIONS = TOTAL_FOLDS
 # - Random guesser (rough baseline): ~0.50 on balanced classes (can be lower if imbalanced).
 # - Decent classifier: >= 0.60.
 # - Good classifier: >= 0.75.
-CV_MIN_MEAN_TEST_SCORE = 0.7
+CV_MIN_MEAN_TEST_SCORE = 0.75
 DEBUG_MIN_MEAN_TEST_SCORE = 0.0
 
 

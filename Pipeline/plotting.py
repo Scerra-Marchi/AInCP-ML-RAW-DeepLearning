@@ -6,9 +6,13 @@ from itertools import product
 import joblib as jl
 import numpy as np
 from predict_samples import build_estimators_list, predict_samples
-import matplotlib
 import matplotlib.pyplot as plt
-from train_regressor import build_regressor_feature_names, regressor_model_path
+import matplotlib
+from train_regressor import (
+    _build_sensor_window_features,
+    build_regressor_feature_names,
+    regressor_model_path,
+)
 from read_file import read_file
 
 import torch
@@ -111,10 +115,24 @@ def plot_dashboards(
             estimators_list,
             subject_metadata,
         )
+        sensor_window_features, sensor_invalid_bitmap = _build_sensor_window_features(
+            data_folder,
+            subject_metadata,
+            window_size,
+            decimation_factor,
+            input_type="week",
+        )
+        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
+        if invalid_bitmap.shape != sensor_invalid_bitmap.shape or not np.array_equal(
+            invalid_bitmap,
+            sensor_invalid_bitmap,
+        ):
+            raise ValueError("Sensor-derived window features are misaligned with predict_samples invalid_bitmap.")
 
         raw_input = {
             "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in predictions],
-            "invalid_bitmap": np.asarray(invalid_bitmap, dtype=np.uint8),
+            "invalid_bitmap": invalid_bitmap,
+            "sensor_window_features": sensor_window_features,
         }
         model_input = np.asarray([raw_input], dtype=object)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)

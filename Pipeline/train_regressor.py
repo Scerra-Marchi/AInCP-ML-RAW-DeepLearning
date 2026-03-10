@@ -13,6 +13,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from predict_samples import build_estimators_list, predict_samples
+from read_file import read_file
 from skorch_models import (
     FFNNRegressor,
     GRUSequenceRegressor,
@@ -25,24 +26,36 @@ from skorch_models import (
 CUMULATIVE_POSITIVE_THRESHOLD = 0.5
 CUMULATIVE_QUANTILE_HIST_BINS = 128
 HOUR_BLOCK_SECONDS = 3600
+RAW_WINDOW_STD_TOL = 0.005
+SENSOR_FEATURE_EPS = 1e-6
 PREPROCESSING_CONFIG = {
     "cumulative_positive_threshold": CUMULATIVE_POSITIVE_THRESHOLD,
     "cumulative_quantile_hist_bins": CUMULATIVE_QUANTILE_HIST_BINS,
     "gru_sequence_scaling": True,
+    "hourly_sensor_features": [
+        "enmo_mean_d",
+        "enmo_mean_nd",
+        "enmo_diff",
+        "enmo_log_ratio",
+        "signed_ai_enmo",
+        "bilateral_enmo_mean",
+        "jerk_mean_d",
+        "jerk_mean_nd",
+    ],
 }
 
 GRU_MODEL_PARAM_GRID = {
-    "model__lr": [1e-1, 1e-2],
+    "model__lr": [0.1, 0.2],
     "model__max_epochs": [500],
     "model__batch_size": [128],
-    "model__module__hidden_size": [16, 32],
+    "model__module__hidden_size": [128, 256],
     "model__module__num_layers": [1, 2],
-    "model__module__dropout": [0.2],
-    "model__optimizer__weight_decay": [0.0, 1e-4],
+    "model__module__dropout": [0.1, 0.25],
+    "model__optimizer__weight_decay": [0.0, 1e-3],
     "model__callbacks__early_stopping__patience": [25],
 }
 GRU_PARAM_GRID = [
-    {**GRU_MODEL_PARAM_GRID, "prep__mode": ["raw"]},
+    # {**GRU_MODEL_PARAM_GRID, "prep__mode": ["raw"]},
     # {**GRU_MODEL_PARAM_GRID, "prep__mode": ["cumulative"]},
     {
         **GRU_MODEL_PARAM_GRID,
@@ -56,7 +69,7 @@ GRU_PARAM_GRID = [
 
 FFNN_PREPROCESSING_MODE = "final_stats"
 FFNN_PARAM_GRID = {
-    "model__lr": [1e-1, 1e-2, 1e-3],
+    "model__lr": [1e-1, 1e-2],
     "model__max_epochs": [500],
     "model__batch_size": [128],
     "model__module__hidden_sizes": [(), (64,), (128, 64)],
@@ -135,6 +148,16 @@ def _hourly_feature_names(n_estimators):
     names += [f"classifier_{i}_hourq25" for i in range(n_estimators)]
     names += [f"classifier_{i}_hourq75" for i in range(n_estimators)]
     names += [f"classifier_{i}_hourposrate" for i in range(n_estimators)]
+    names += [
+        "hour_enmo_mean_d",
+        "hour_enmo_mean_nd",
+        "hour_enmo_diff",
+        "hour_enmo_log_ratio",
+        "hour_signed_ai_enmo",
+        "hour_bilateral_enmo_mean",
+        "hour_jerk_mean_d",
+        "hour_jerk_mean_nd",
+    ]
     names += ["hour_valid_fraction", "time_sin", "time_cos"]
     return names
 
@@ -167,6 +190,58 @@ def _time_features(n_steps, window_size, decimation_factor, fs):
     seconds_in_day = 24 * 60 * 60
     angle = 2 * np.pi * np.mod(t_abs, seconds_in_day) / seconds_in_day
     return np.sin(angle).reshape(-1, 1), np.cos(angle).reshape(-1, 1)
+
+
+def _log_ratio(primary, secondary):
+    return np.log(primary + SENSOR_FEATURE_EPS) - np.log(secondary + SENSOR_FEATURE_EPS)
+
+
+def _window_invalid_bitmap(D_w, ND_w, std_tol=RAW_WINDOW_STD_TOL):
+    combined = np.concatenate((D_w, ND_w), axis=2)
+    std_features = np.std(combined, axis=1)
+    return np.all(std_features < std_tol, axis=1)
+
+
+def _build_sensor_window_features(data_folder, subject_metadata, window_size, decimation_factor, input_type="week"):
+    subject = int(subject_metadata["subject"])
+    D, ND = read_file(
+        data_folder=data_folder,
+        subject=subject,
+        WINDOW_SIZE=window_size,
+        decimation_factor=decimation_factor,
+        input_type=input_type,
+    )
+
+    n_windows = len(D) // window_size
+    D_w = D.reshape(n_windows, window_size, 3)
+    ND_w = ND.reshape(n_windows, window_size, 3)
+
+    mag_d = np.linalg.norm(D_w, axis=2).astype(np.float32)
+    mag_nd = np.linalg.norm(ND_w, axis=2).astype(np.float32)
+    enmo_d = np.maximum(mag_d - 1.0, 0.0)
+    enmo_nd = np.maximum(mag_nd - 1.0, 0.0)
+    jerk_d = np.abs(np.diff(enmo_d, axis=1, prepend=enmo_d[:, :1]))
+    jerk_nd = np.abs(np.diff(enmo_nd, axis=1, prepend=enmo_nd[:, :1]))
+
+    enmo_mean_d = enmo_d.mean(axis=1).astype(np.float32)
+    enmo_mean_nd = enmo_nd.mean(axis=1).astype(np.float32)
+    enmo_diff = (enmo_mean_d - enmo_mean_nd).astype(np.float32)
+    bilateral_enmo_mean = (enmo_mean_d + enmo_mean_nd).astype(np.float32)
+    sensor_window_features = {
+        "enmo_mean_d": enmo_mean_d,
+        "enmo_mean_nd": enmo_mean_nd,
+        "enmo_diff": enmo_diff,
+        "enmo_log_ratio": _log_ratio(enmo_mean_d, enmo_mean_nd).astype(np.float32),
+        "signed_ai_enmo": np.divide(
+            enmo_diff,
+            bilateral_enmo_mean + SENSOR_FEATURE_EPS,
+        ).astype(np.float32),
+        "bilateral_enmo_mean": bilateral_enmo_mean,
+        "jerk_mean_d": jerk_d.mean(axis=1).astype(np.float32),
+        "jerk_mean_nd": jerk_nd.mean(axis=1).astype(np.float32),
+    }
+    invalid_bitmap = _window_invalid_bitmap(D_w, ND_w).astype(np.uint8)
+    return sensor_window_features, invalid_bitmap
 
 
 def _compute_cumulative_quantiles_histogram(probs_matrix, valid_mask, n_bins):
@@ -288,15 +363,31 @@ def _compute_final_summary_features(probs_matrix, valid_mask):
     return np.hstack((mean, std, q25, q75, pos_rate, valid_fraction))
 
 
-def _build_raw_sequence(probs_matrix, invalid, window_size, decimation_factor, fs, hour_block_seconds):
-    del hour_block_seconds
+def _build_raw_sequence(
+    probs_matrix,
+    invalid,
+    sensor_window_features,
+    window_size,
+    decimation_factor,
+    fs,
+    hour_block_seconds,
+):
+    del sensor_window_features, hour_block_seconds
     time_sin, time_cos = _time_features(probs_matrix.shape[0], window_size, decimation_factor, fs)
     invalid_col = invalid.astype(np.float32).reshape(-1, 1)
     return np.hstack((probs_matrix, invalid_col, time_sin, time_cos)).astype(np.float32)
 
 
-def _build_cumulative_sequence(probs_matrix, invalid, window_size, decimation_factor, fs, hour_block_seconds):
-    del hour_block_seconds
+def _build_cumulative_sequence(
+    probs_matrix,
+    invalid,
+    sensor_window_features,
+    window_size,
+    decimation_factor,
+    fs,
+    hour_block_seconds,
+):
+    del sensor_window_features, hour_block_seconds
     valid_mask = ~invalid.astype(bool)
     (
         cum_mean,
@@ -327,6 +418,7 @@ def _build_cumulative_sequence(probs_matrix, invalid, window_size, decimation_fa
 def _build_hourly_sequence(
     probs_matrix,
     invalid,
+    sensor_window_features,
     window_size,
     decimation_factor,
     fs,
@@ -343,14 +435,29 @@ def _build_hourly_sequence(
     block_q25 = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_q75 = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_pos = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
+    block_sensor = np.zeros((n_blocks, 8), dtype=np.float32)
     block_valid_fraction = np.zeros((n_blocks, 1), dtype=np.float32)
     block_center_seconds = np.zeros(n_blocks, dtype=np.float32)
+    sensor_keys = (
+        "enmo_mean_d",
+        "enmo_mean_nd",
+        "enmo_diff",
+        "enmo_log_ratio",
+        "signed_ai_enmo",
+        "bilateral_enmo_mean",
+        "jerk_mean_d",
+        "jerk_mean_nd",
+    )
+    sensor_matrix = np.column_stack(
+        [np.asarray(sensor_window_features[key], dtype=np.float32) for key in sensor_keys]
+    )
 
     for b in range(n_blocks):
         start = b * steps_per_block
         end = min(n_windows, (b + 1) * steps_per_block)
         block_probs = probs_matrix[start:end]
         block_valid = valid_mask[start:end]
+        block_sensor_values = sensor_matrix[start:end]
 
         if block_valid.size > 0:
             block_valid_fraction[b, 0] = float(block_valid.mean())
@@ -368,6 +475,10 @@ def _build_hourly_sequence(
                 np.where(block_valid[:, None], block_probs >= CUMULATIVE_POSITIVE_THRESHOLD, np.nan),
                 axis=0,
             ).astype(np.float32)
+            block_sensor[b] = np.nanmean(
+                np.where(block_valid[:, None], block_sensor_values, np.nan),
+                axis=0,
+            ).astype(np.float32)
 
     seconds_in_day = 24 * 60 * 60
     angle = 2 * np.pi * np.mod(block_center_seconds, seconds_in_day) / seconds_in_day
@@ -381,6 +492,7 @@ def _build_hourly_sequence(
             block_q25,
             block_q75,
             block_pos,
+            block_sensor,
             block_valid_fraction,
             time_sin,
             time_cos,
@@ -398,6 +510,7 @@ _SEQUENCE_BUILDERS = {
 def build_regressor_sequence(
     predictions_list,
     invalid_bitmap,
+    sensor_window_features,
     window_size,
     decimation_factor,
     fs=80,
@@ -409,6 +522,7 @@ def build_regressor_sequence(
     return _SEQUENCE_BUILDERS[mode](
         probs_matrix,
         invalid,
+        sensor_window_features,
         window_size,
         decimation_factor,
         fs,
@@ -439,6 +553,7 @@ class SequencePreprocessor(BaseEstimator, TransformerMixin):
             build_regressor_sequence(
                 sample["predictions_list"],
                 sample["invalid_bitmap"],
+                sample.get("sensor_window_features"),
                 self.window_size,
                 self.decimation_factor,
                 fs=self.fs,
@@ -588,10 +703,24 @@ def train_regressor(
             estimators_list,
             subject_metadata,
         )
+        sensor_window_features, sensor_invalid_bitmap = _build_sensor_window_features(
+            data_folder,
+            subject_metadata,
+            window_size,
+            decimation_factor,
+            input_type="week",
+        )
+        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
+        if invalid_bitmap.shape != sensor_invalid_bitmap.shape or not np.array_equal(
+            invalid_bitmap,
+            sensor_invalid_bitmap,
+        ):
+            raise ValueError("Sensor-derived window features are misaligned with predict_samples invalid_bitmap.")
         raw_samples.append(
             {
                 "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in estimator_probs_list],
-                "invalid_bitmap": np.asarray(invalid_bitmap, dtype=np.uint8),
+                "invalid_bitmap": invalid_bitmap,
+                "sensor_window_features": sensor_window_features,
             }
         )
         print("REGRESSOR: PATIENT", subject_metadata["subject"], "END")
