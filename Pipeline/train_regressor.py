@@ -22,8 +22,7 @@ from skorch_models import (
     set_global_determinism,
 )
 
-CUMULATIVE_POSITIVE_THRESHOLD = 0.5
-CUMULATIVE_QUANTILE_HIST_BINS = 128
+POSITIVE_THRESHOLD = 0.5
 FOUR_MINUTES_BLOCK_SECONDS = 4 * 60
 HOUR_BLOCK_SECONDS = 3600
 WHOLE_WEEK_BLOCK_SECONDS = 6 * 24 * HOUR_BLOCK_SECONDS
@@ -40,10 +39,9 @@ SENSOR_WINDOW_FEATURE_KEYS = (
     "jerk_mean_nd",
 )
 PREPROCESSING_CONFIG = {
-    "cumulative_positive_threshold": CUMULATIVE_POSITIVE_THRESHOLD,
-    "cumulative_quantile_hist_bins": CUMULATIVE_QUANTILE_HIST_BINS,
+    "positive_threshold": POSITIVE_THRESHOLD,
     "gru_sequence_scaling": True,
-    "hourly_sensor_features": list(SENSOR_WINDOW_FEATURE_KEYS),
+    "block_sensor_features": list(SENSOR_WINDOW_FEATURE_KEYS),
 }
 
 GRU_MODEL_PARAM_GRID = {
@@ -59,7 +57,7 @@ GRU_MODEL_PARAM_GRID = {
 GRU_PARAM_GRID = [
     {
         **GRU_MODEL_PARAM_GRID,
-        "prep__hour_block_seconds": [
+        "prep__block_seconds": [
             FOUR_MINUTES_BLOCK_SECONDS,
             HOUR_BLOCK_SECONDS,
             24 * HOUR_BLOCK_SECONDS,
@@ -102,40 +100,24 @@ def regressor_model_path(save_folder, estimators_list):
     )
 
 
-def _hourly_feature_names(n_estimators):
-    names = [f"classifier_{i}_hourmean" for i in range(n_estimators)]
-    names += [f"classifier_{i}_hourstd" for i in range(n_estimators)]
-    names += [f"classifier_{i}_hourq25" for i in range(n_estimators)]
-    names += [f"classifier_{i}_hourq75" for i in range(n_estimators)]
-    names += [f"classifier_{i}_hourposrate" for i in range(n_estimators)]
+def build_block_feature_names(n_features, n_estimators):
+    names = [f"classifier_{i}_block_mean" for i in range(n_estimators)]
+    names += [f"classifier_{i}_block_std" for i in range(n_estimators)]
+    names += [f"classifier_{i}_block_q25" for i in range(n_estimators)]
+    names += [f"classifier_{i}_block_q75" for i in range(n_estimators)]
+    names += [f"classifier_{i}_block_posrate" for i in range(n_estimators)]
     names += [
-        "hour_enmo_mean_d",
-        "hour_enmo_mean_nd",
-        "hour_enmo_diff",
-        "hour_enmo_log_ratio",
-        "hour_signed_ai_enmo",
-        "hour_bilateral_enmo_mean",
-        "hour_jerk_mean_d",
-        "hour_jerk_mean_nd",
+        "block_enmo_mean_d",
+        "block_enmo_mean_nd",
+        "block_enmo_diff",
+        "block_enmo_log_ratio",
+        "block_signed_ai_enmo",
+        "block_bilateral_enmo_mean",
+        "block_jerk_mean_d",
+        "block_jerk_mean_nd",
     ]
-    names += ["hour_valid_fraction", "time_sin", "time_cos"]
-    return names
-
-_FEATURE_NAME_BUILDERS = {
-    "hourly": _hourly_feature_names,
-}
-
-
-def build_regressor_feature_names(mode, n_features, n_estimators):
-    return _FEATURE_NAME_BUILDERS[mode](n_estimators)[:n_features]
-
-
-def _time_features(n_steps, window_size, decimation_factor, fs):
-    seconds_per_window = window_size * decimation_factor / fs
-    t_abs = np.arange(n_steps, dtype=np.float32) * seconds_per_window
-    seconds_in_day = 24 * 60 * 60
-    angle = 2 * np.pi * np.mod(t_abs, seconds_in_day) / seconds_in_day
-    return np.sin(angle).reshape(-1, 1), np.cos(angle).reshape(-1, 1)
+    names += ["block_valid_fraction", "time_sin", "time_cos"]
+    return names[:n_features]
 
 
 def _read_windowed_raw_signals(data_folder, subject_metadata, window_size, decimation_factor, input_type="week"):
@@ -167,6 +149,12 @@ def _compute_sensor_window_features(data_folder, subject_metadata, window_size, 
         ND_w,
         epsilon=SENSOR_FEATURE_EPS,
         std_tol=RAW_WINDOW_STD_TOL,
+    )
+
+
+def _sensor_feature_matrix(sensor_window_features):
+    return np.column_stack(
+        [np.asarray(sensor_window_features[key], dtype=np.float32) for key in SENSOR_WINDOW_FEATURE_KEYS]
     )
 
 
@@ -202,23 +190,23 @@ def build_regressor_sample(
     sample = {
         "predictions_list": [np.asarray(pred, dtype=np.float32) for pred in predictions_list],
         "invalid_bitmap": invalid_bitmap,
-        "sensor_window_features": sensor_window_features,
+        "sensor_window_matrix": _sensor_feature_matrix(sensor_window_features),
     }
     return sample
 
-def _build_hourly_sequence(
+def _build_block_sequence(
     probs_matrix,
     invalid,
-    sensor_window_features,
+    sensor_window_matrix,
     window_size,
     decimation_factor,
     fs,
-    hour_block_seconds,
+    block_seconds,
 ):
     n_windows, n_estimators = probs_matrix.shape
     valid_mask = ~invalid.astype(bool)
     seconds_per_window = window_size * decimation_factor / fs
-    steps_per_block = max(1, int(round(hour_block_seconds / seconds_per_window)))
+    steps_per_block = max(1, int(round(block_seconds / seconds_per_window)))
     n_blocks = int(np.ceil(n_windows / steps_per_block))
 
     block_mean = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
@@ -229,9 +217,7 @@ def _build_hourly_sequence(
     block_sensor = np.zeros((n_blocks, len(SENSOR_WINDOW_FEATURE_KEYS)), dtype=np.float32)
     block_valid_fraction = np.zeros((n_blocks, 1), dtype=np.float32)
     block_center_seconds = np.zeros(n_blocks, dtype=np.float32)
-    sensor_matrix = np.column_stack(
-        [np.asarray(sensor_window_features[key], dtype=np.float32) for key in SENSOR_WINDOW_FEATURE_KEYS]
-    )
+    sensor_matrix = np.asarray(sensor_window_matrix, dtype=np.float32)
 
     for b in range(n_blocks):
         start = b * steps_per_block
@@ -253,7 +239,7 @@ def _build_hourly_sequence(
             block_q25[b] = np.nanquantile(valid_vals, 0.25, axis=0).astype(np.float32)
             block_q75[b] = np.nanquantile(valid_vals, 0.75, axis=0).astype(np.float32)
             block_pos[b] = np.nanmean(
-                np.where(block_valid[:, None], block_probs >= CUMULATIVE_POSITIVE_THRESHOLD, np.nan),
+                np.where(block_valid[:, None], block_probs >= POSITIVE_THRESHOLD, np.nan),
                 axis=0,
             ).astype(np.float32)
             block_sensor[b] = np.nanmean(
@@ -280,55 +266,55 @@ def _build_hourly_sequence(
         )
     ).astype(np.float32)
 
-def build_regressor_sequence(
+def build_block_regressor_sequence(
     predictions_list,
     invalid_bitmap,
-    sensor_window_features,
+    sensor_window_matrix,
     window_size,
     decimation_factor,
     fs=80,
-    hour_block_seconds=HOUR_BLOCK_SECONDS,
+    block_seconds=HOUR_BLOCK_SECONDS,
 ):
     probs_matrix = np.column_stack([np.asarray(pred, dtype=np.float32) for pred in predictions_list])
     invalid = np.asarray(invalid_bitmap, dtype=np.uint8).reshape(-1)
-    return _build_hourly_sequence(
+    return _build_block_sequence(
         probs_matrix,
         invalid,
-        sensor_window_features,
+        sensor_window_matrix,
         window_size,
         decimation_factor,
         fs,
-        hour_block_seconds,
+        block_seconds,
     )
 
 
-class SequencePreprocessor(BaseEstimator, TransformerMixin):
+class BlockSequencePreprocessor(BaseEstimator, TransformerMixin):
     def __init__(
         self,
         window_size,
         decimation_factor,
         fs=80,
-        hour_block_seconds=HOUR_BLOCK_SECONDS,
+        block_seconds=HOUR_BLOCK_SECONDS,
     ):
         self.window_size = window_size
         self.decimation_factor = decimation_factor
         self.fs = fs
-        self.mode = "hourly"
-        self.hour_block_seconds = hour_block_seconds
+        self.mode = "block"
+        self.block_seconds = block_seconds
 
     def fit(self, X, y=None):
         return self
 
     def transform(self, X):
         sequences = [
-            build_regressor_sequence(
+            build_block_regressor_sequence(
                 sample["predictions_list"],
                 sample["invalid_bitmap"],
-                sample.get("sensor_window_features"),
+                sample["sensor_window_matrix"],
                 self.window_size,
                 self.decimation_factor,
                 fs=self.fs,
-                hour_block_seconds=self.hour_block_seconds,
+                block_seconds=self.block_seconds,
             )
             for sample in X
         ]
@@ -358,7 +344,7 @@ def _fit_pipeline_with_grid_search(
             refit=True,
             n_jobs=1,
             return_train_score=True,
-            verbose=0,
+            verbose=1,
         )
         grid.fit(X_raw, y)
         best_estimator = grid.best_estimator_
@@ -382,12 +368,12 @@ def _fit_pipeline_with_grid_search(
     return best_estimator
 
 
-def _build_gru_pipeline(model_dir, window_size, decimation_factor, regressor_device):
+def _build_gru_pipeline(window_size, decimation_factor, regressor_device):
     return Pipeline(
         [
             (
                 "prep",
-                SequencePreprocessor(
+                BlockSequencePreprocessor(
                     window_size=window_size,
                     decimation_factor=decimation_factor,
                 ),
@@ -454,20 +440,18 @@ def train_regressor(
         duplicates="drop",
     ).to_numpy()
 
-    if not os.path.exists(gru_model_path):
-        gru_model = _fit_pipeline_with_grid_search(
-            X_raw=X_raw,
-            y=y,
-            strat_labels=strat_labels,
-            model_dir=gru_dir,
-            estimator=_build_gru_pipeline(
-                gru_dir,
-                window_size,
-                decimation_factor,
-                regressor_device,
-            ),
-            param_grid=GRU_PARAM_GRID,
-            model_label="GRU REGRESSOR",
-            loss_label="MSELoss",
-        )
-        jl.dump(gru_model, gru_model_path)
+    gru_model = _fit_pipeline_with_grid_search(
+        X_raw=X_raw,
+        y=y,
+        strat_labels=strat_labels,
+        model_dir=gru_dir,
+        estimator=_build_gru_pipeline(
+            window_size,
+            decimation_factor,
+            regressor_device,
+        ),
+        param_grid=GRU_PARAM_GRID,
+        model_label="GRU REGRESSOR",
+        loss_label="MSELoss",
+    )
+    jl.dump(gru_model, gru_model_path)

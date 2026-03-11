@@ -9,8 +9,8 @@ from predict_samples import build_estimators_list, predict_samples
 import matplotlib.pyplot as plt
 import matplotlib
 from train_regressor import (
+    build_block_feature_names,
     build_regressor_sample,
-    build_regressor_feature_names,
     regressor_model_path,
 )
 from read_file import read_file
@@ -27,14 +27,14 @@ def _regressor_timeline_context(
     window_size,
     decimation_factor,
 ):
-    prep_mode = getattr(prep, "mode", "hourly")
-    if prep_mode != "hourly":
+    prep_mode = getattr(prep, "mode", "block")
+    if prep_mode != "block":
         return window_timestamps, invalid_mask
 
     fs = getattr(prep, "fs", 80)
-    hour_block_seconds = getattr(prep, "hour_block_seconds", 3600)
+    block_seconds = getattr(prep, "block_seconds", 3600)
     seconds_per_window = window_size * decimation_factor / fs
-    steps_per_block = max(1, int(round(hour_block_seconds / seconds_per_window)))
+    steps_per_block = max(1, int(round(block_seconds / seconds_per_window)))
     n_windows = invalid_mask.size
     n_blocks = int(np.ceil(n_windows / steps_per_block))
 
@@ -92,7 +92,7 @@ def plot_dashboards(
     )
     regressor = jl.load(model_path)
     prep = regressor.named_steps["prep"]
-    prep_mode = getattr(prep, "mode", "hourly")
+    prep_mode = getattr(prep, "mode", "block")
 
     # --- SHAP setup ---
     net = regressor.named_steps["model"].module_
@@ -184,8 +184,7 @@ def plot_dashboards(
         abs_attr = np.abs(attr)
         time_importance = np.mean(abs_attr, axis=1)
 
-        feature_names = build_regressor_feature_names(
-            mode=prep_mode,
+        feature_names = build_block_feature_names(
             n_features=regressor_sequence.shape[1],
             n_estimators=len(predictions),
         )
