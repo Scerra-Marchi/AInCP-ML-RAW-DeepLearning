@@ -19,6 +19,41 @@ import torch
 import shap
 
 
+def _transform_regressor_input_for_shap(regressor, model_input):
+    prep = regressor.named_steps["prep"]
+    scaler = regressor.named_steps["scaler"]
+    regressor_sequence = prep.transform(model_input)
+    regressor_sequence_scaled = scaler.transform(regressor_sequence)
+    return regressor_sequence, regressor_sequence_scaled
+
+
+def _build_regressor_shap_explainer(
+    *,
+    regressor,
+    background_samples,
+    device,
+):
+    net = regressor.named_steps["model"].module_
+    net.eval()
+
+    if not background_samples:
+        raise ValueError("plot_dashboards metadata is empty.")
+
+    background_sequence_scaled = np.stack(
+        [entry["regressor_sequence_scaled"] for entry in background_samples]
+    ).astype(np.float32)
+    background_tensor = torch.tensor(background_sequence_scaled, dtype=torch.float32).to(device)
+
+    prev_return_last_step = getattr(net, "return_last_step", None)
+    if prev_return_last_step is not None:
+        net.return_last_step = True
+    try:
+        return shap.GradientExplainer(net, background_tensor)
+    finally:
+        if prev_return_last_step is not None:
+            net.return_last_step = prev_return_last_step
+
+
 def _regressor_timeline_context(
     *,
     prep,
@@ -99,17 +134,12 @@ def plot_dashboards(
     net.eval()
     device = next(net.parameters()).device
 
-    # DISABILITA CUDNN PER RNN
+    # Gradient-based explainers on GRU inputs are more reliable with the non-cuDNN autograd path.
     torch.backends.cudnn.enabled = False
 
     timestamps = jl.load(timestamps_file)
-
-    healthy_percentage = []
-    predicted_aha_list = []
-
+    subject_entries = []
     for _, subject_metadata in metadata.iterrows():
-        subject = int(subject_metadata['subject'])
-
         predictions, hp_tot_list, invalid_bitmap = predict_samples(
             data_folder,
             estimators_list,
@@ -124,9 +154,42 @@ def plot_dashboards(
             invalid_bitmap=invalid_bitmap,
         )
         model_input = np.asarray([raw_input], dtype=object)
-        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
+        regressor_sequence, regressor_sequence_scaled = _transform_regressor_input_for_shap(
+            regressor,
+            model_input,
+        )
+        subject_entries.append(
+            {
+                "subject_metadata": subject_metadata,
+                "predictions": predictions,
+                "hp_tot_list": hp_tot_list,
+                "invalid_bitmap": np.asarray(invalid_bitmap, dtype=np.uint8),
+                "raw_input": raw_input,
+                "regressor_sequence": regressor_sequence[0],
+                "regressor_sequence_scaled": regressor_sequence_scaled[0],
+            }
+        )
+
+    explainer = _build_regressor_shap_explainer(
+        regressor=regressor,
+        background_samples=subject_entries,
+        device=device,
+    )
+
+    healthy_percentage = []
+    predicted_aha_list = []
+
+    for entry in subject_entries:
+        subject_metadata = entry["subject_metadata"]
+        subject = int(subject_metadata['subject'])
+        predictions = entry["predictions"]
+        hp_tot_list = entry["hp_tot_list"]
+        invalid_bitmap = entry["invalid_bitmap"]
+        raw_input = entry["raw_input"]
+        regressor_sequence = entry["regressor_sequence"]
+        regressor_sequence_scaled = entry["regressor_sequence_scaled"]
+        model_input = np.asarray([raw_input], dtype=object)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
-        regressor_sequence = prep.transform(model_input)[0]
         window_timestamps = timestamps[::window_size][:len(predictions[0])]
         regressor_timestamps, regressor_invalid_mask = _regressor_timeline_context(
             prep=prep,
@@ -164,13 +227,11 @@ def plot_dashboards(
 
         #################### EXPLAINABILITY ####################
 
-        x = torch.tensor(regressor_sequence, dtype=torch.float32).unsqueeze(0).to(device)
-        baseline = x.mean(dim=1, keepdim=True).repeat(1, x.shape[1], 1)
+        x = torch.tensor(regressor_sequence_scaled, dtype=torch.float32).unsqueeze(0).to(device)
         prev_return_last_step = getattr(net, "return_last_step", None)
         if prev_return_last_step is not None:
             net.return_last_step = True
         try:
-            explainer = shap.GradientExplainer(net, baseline)
             shap_values = explainer.shap_values(x)
         finally:
             if prev_return_last_step is not None:
@@ -208,7 +269,7 @@ def plot_dashboards(
             )
             shap.summary_plot(
                 attr,
-                features=regressor_sequence,
+                features=regressor_sequence_scaled,
                 feature_names=feature_names,
                 show=False,
                 plot_size=None,
@@ -227,7 +288,7 @@ def plot_dashboards(
             )
             shap.summary_plot(
                 attr,
-                features=regressor_sequence,
+                features=regressor_sequence_scaled,
                 feature_names=feature_names,
                 plot_type="bar",
                 show=False,
