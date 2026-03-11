@@ -6,7 +6,6 @@ from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
 from train_regressor import (
     build_regressor_sample,
-    ffnn_model_path,
     regressor_model_path,
 )
 
@@ -101,27 +100,15 @@ def test_classifier_regressor(
     gru_regressor = jl.load(model_path)
     y_pred_gru = np.asarray(gru_regressor.predict(X_raw), dtype=float).reshape(-1)
 
-    ffnn_path = ffnn_model_path(
-        save_folder=save_folder,
-        estimators_list=estimators_list,
-    )
-    ffnn_regressor = jl.load(ffnn_path)
-    y_pred_ffnn = np.asarray(ffnn_regressor.predict(X_raw), dtype=float).reshape(-1)
-
     data_regression = {
         "Regressor path": model_path,
         "R2 Score": r2_score(y, y_pred_gru),
         "Classifiers Used": model_params_list
     }
-    data_ffnn = {
-        "FFNN path": ffnn_path,
-        "R2 Score": r2_score(y, y_pred_ffnn),
-    }
 
     data_test = {
         "Selected Classifiers Stats": classifiers_stats,
         "GRU Regressor Stats": data_regression,
-        "FFNN Regressor Stats": data_ffnn,
     }
 
     # Writing to a JSON file

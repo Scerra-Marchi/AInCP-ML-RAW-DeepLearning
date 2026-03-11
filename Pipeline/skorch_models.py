@@ -473,44 +473,6 @@ class GRUSequenceRegressor(nn.Module):
         return self.regressor(out) + skip_out
 
 
-class FFNNRegressor(nn.Module):
-    def __init__(
-        self,
-        *,
-        hidden_sizes: tuple = (),
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.hidden_sizes = tuple(int(h) for h in hidden_sizes)
-        self.dropout = float(dropout)
-        layers = []
-
-        if self.hidden_sizes:
-            layers.append(nn.LazyLinear(self.hidden_sizes[0]))
-            layers.append(nn.ReLU())
-            if self.dropout > 0:
-                layers.append(nn.Dropout(self.dropout))
-
-            for in_features, out_features in zip(self.hidden_sizes[:-1], self.hidden_sizes[1:]):
-                layers.append(nn.Linear(in_features, out_features))
-                layers.append(nn.ReLU())
-                if self.dropout > 0:
-                    layers.append(nn.Dropout(self.dropout))
-
-            layers.append(nn.Linear(self.hidden_sizes[-1], 1))
-        else:
-            # Linear baseline equivalent with lazy input size inference.
-            layers.append(nn.LazyLinear(1))
-
-        self.network = nn.Sequential(*layers)
-
-    def forward(self, x):
-        x = x.float()
-        if x.ndim > 2:
-            x = x.reshape(x.shape[0], -1)
-        return self.network(x)
-
-
 def _flatten_windows(X):
     X = np.asarray(X, dtype=np.float32)
     if X.ndim > 2:

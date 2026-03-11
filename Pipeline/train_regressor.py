@@ -10,13 +10,11 @@ from joblib import Memory
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 from predict_samples import build_estimators_list, predict_samples
 from read_file import read_file
 from signal_features import compute_window_sensor_features
 from skorch_models import (
-    FFNNRegressor,
     GRUSequenceRegressor,
     SequenceStandardScaler,
     make_regressor_net,
@@ -70,17 +68,6 @@ GRU_PARAM_GRID = [
     },
 ]
 
-FFNN_PREPROCESSING_MODE = "final_stats"
-FFNN_PARAM_GRID = {
-    "model__lr": [1e-1, 1e-2],
-    "model__max_epochs": [500],
-    "model__batch_size": [128],
-    "model__module__hidden_sizes": [(), (64,), (128, 64)],
-    "model__module__dropout": [0.0, 0.1, 0.2],
-    "model__optimizer__weight_decay": [0.0, 1e-2, 1e-3],
-    "model__callbacks__early_stopping__patience": [10],
-}
-
 
 def _classifier_model_paths(estimators_list):
     return sorted(
@@ -115,19 +102,6 @@ def regressor_model_path(save_folder, estimators_list):
     )
 
 
-def ffnn_model_path(save_folder, estimators_list):
-    return _hashed_model_path(
-        save_folder=save_folder,
-        folder_prefix="ffnn_regressor",
-        filename="ffnn.joblib",
-        estimators_list=estimators_list,
-        model_payload={
-            "ffnn_preprocessing_mode": FFNN_PREPROCESSING_MODE,
-            "ffnn_param_grid": FFNN_PARAM_GRID,
-        },
-    )
-
-
 def _hourly_feature_names(n_estimators):
     names = [f"classifier_{i}_hourmean" for i in range(n_estimators)]
     names += [f"classifier_{i}_hourstd" for i in range(n_estimators)]
@@ -147,20 +121,8 @@ def _hourly_feature_names(n_estimators):
     names += ["hour_valid_fraction", "time_sin", "time_cos"]
     return names
 
-
-def _final_stats_feature_names(n_estimators):
-    names = [f"classifier_{i}_cummean" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumstd" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumq25" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumq75" for i in range(n_estimators)]
-    names += [f"classifier_{i}_cumposrate" for i in range(n_estimators)]
-    names += ["cum_valid_fraction"]
-    return names
-
-
 _FEATURE_NAME_BUILDERS = {
     "hourly": _hourly_feature_names,
-    "final_stats": _final_stats_feature_names,
 }
 
 
@@ -243,63 +205,6 @@ def build_regressor_sample(
         "sensor_window_features": sensor_window_features,
     }
     return sample
-
-
-def _compute_final_quantiles_histogram(probs_matrix, valid_mask, n_bins):
-    _, n_estimators = probs_matrix.shape
-    q25 = np.full(n_estimators, 0.5, dtype=np.float32)
-    q75 = np.full(n_estimators, 0.5, dtype=np.float32)
-    if not np.any(valid_mask):
-        return q25, q75
-
-    valid_probs = probs_matrix[valid_mask]
-    counts = np.ones(valid_probs.shape[0], dtype=np.int32)
-    for est_idx in range(n_estimators):
-        values = valid_probs[:, est_idx]
-        bin_idx = np.clip((values * n_bins).astype(np.int32), 0, n_bins - 1)
-        hist = np.bincount(bin_idx, weights=counts, minlength=n_bins)
-        total = int(hist.sum())
-        q25_target = int(np.ceil(0.25 * total))
-        q75_target = int(np.ceil(0.75 * total))
-        cum_hist = np.cumsum(hist)
-        q25_bin = int((cum_hist >= q25_target).argmax())
-        q75_bin = int((cum_hist >= q75_target).argmax())
-        q25[est_idx] = (q25_bin + 0.5) / float(n_bins)
-        q75[est_idx] = (q75_bin + 0.5) / float(n_bins)
-    return q25, q75
-
-
-def _compute_final_summary_features(probs_matrix, valid_mask):
-    n_windows, n_estimators = probs_matrix.shape
-    if n_windows == 0 or not np.any(valid_mask):
-        return np.hstack(
-            (
-                np.full(n_estimators, 0.5, dtype=np.float32),
-                np.zeros(n_estimators, dtype=np.float32),
-                np.full(n_estimators, 0.5, dtype=np.float32),
-                np.full(n_estimators, 0.5, dtype=np.float32),
-                np.full(n_estimators, 0.5, dtype=np.float32),
-                np.array([0.0], dtype=np.float32),
-            )
-        )
-
-    valid_vals = np.where(valid_mask[:, None], probs_matrix, np.nan)
-    mean = np.nanmean(valid_vals, axis=0).astype(np.float32)
-    std = np.nanstd(valid_vals, axis=0).astype(np.float32)
-    pos_rate = np.nanmean(
-        np.where(valid_mask[:, None], probs_matrix >= CUMULATIVE_POSITIVE_THRESHOLD, np.nan),
-        axis=0,
-    ).astype(np.float32)
-
-    q25, q75 = _compute_final_quantiles_histogram(
-        probs_matrix,
-        valid_mask,
-        n_bins=CUMULATIVE_QUANTILE_HIST_BINS,
-    )
-
-    valid_fraction = np.array([valid_mask.mean()], dtype=np.float32)
-    return np.hstack((mean, std, q25, q75, pos_rate, valid_fraction))
-
 
 def _build_hourly_sequence(
     probs_matrix,
@@ -429,22 +334,6 @@ class SequencePreprocessor(BaseEstimator, TransformerMixin):
         ]
         return np.stack(sequences).astype(np.float32)
 
-
-class FinalStatsPreprocessor(BaseEstimator, TransformerMixin):
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        features = []
-        for sample in X:
-            probs_matrix = np.column_stack(
-                [np.asarray(pred, dtype=np.float32) for pred in sample["predictions_list"]]
-            )
-            valid_mask = ~np.asarray(sample["invalid_bitmap"], dtype=np.uint8).reshape(-1).astype(bool)
-            features.append(_compute_final_summary_features(probs_matrix, valid_mask))
-        return np.stack(features).astype(np.float32)
-
-
 def _fit_pipeline_with_grid_search(
     X_raw,
     y,
@@ -517,18 +406,6 @@ def _build_gru_pipeline(model_dir, window_size, decimation_factor, regressor_dev
         ]
     )
 
-
-def _build_ffnn_pipeline(model_dir, window_size, decimation_factor, regressor_device):
-    del window_size, decimation_factor
-    return Pipeline(
-        [
-            ("prep", FinalStatsPreprocessor()),
-            ("scaler", StandardScaler()),
-            ("model", make_regressor_net(module=FFNNRegressor, device=regressor_device)),
-        ]
-    )
-
-
 def train_regressor(
     data_folder,
     save_folder,
@@ -548,15 +425,11 @@ def train_regressor(
     )
 
     gru_model_path = regressor_model_path(save_folder=save_folder, estimators_list=estimators_list)
-    ffnn_path = ffnn_model_path(save_folder=save_folder, estimators_list=estimators_list)
     gru_dir = os.path.dirname(gru_model_path)
-    ffnn_dir = os.path.dirname(ffnn_path)
 
     os.makedirs(gru_dir, exist_ok=True)
-    os.makedirs(ffnn_dir, exist_ok=True)
-    if os.path.exists(gru_model_path) and os.path.exists(ffnn_path):
+    if os.path.exists(gru_model_path):
         print("GRU REGRESSOR: already trained ->", gru_model_path)
-        print("FFNN REGRESSOR: already trained ->", ffnn_path)
         return
 
     raw_samples = []
@@ -580,24 +453,6 @@ def train_regressor(
         labels=False,
         duplicates="drop",
     ).to_numpy()
-
-    if not os.path.exists(ffnn_path):
-        ffnn_model = _fit_pipeline_with_grid_search(
-            X_raw=X_raw,
-            y=y,
-            strat_labels=strat_labels,
-            model_dir=ffnn_dir,
-            estimator=_build_ffnn_pipeline(
-                ffnn_dir,
-                window_size,
-                decimation_factor,
-                regressor_device,
-            ),
-            param_grid=FFNN_PARAM_GRID,
-            model_label="FFNN REGRESSOR",
-            loss_label="MSELoss",
-        )
-        jl.dump(ffnn_model, ffnn_path)
 
     if not os.path.exists(gru_model_path):
         gru_model = _fit_pipeline_with_grid_search(
