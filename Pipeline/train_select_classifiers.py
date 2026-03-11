@@ -329,9 +329,6 @@ def train_select_classifiers(
         gridsearch_specs = gridsearch_specs_list[spec_idx]
         gridsearch_folder = _gridsearch_folder_for_task(method, window_size, decimation_factor, gridsearch_specs)
         cv_results_path = gridsearch_folder + "GridSearchCV_stats/cv_results.csv"
-        if not os.path.exists(cv_results_path):
-            print("Skipping missing GridSearchCV results ->", cv_results_path)
-            continue
         cv_results = pd.read_csv(cv_results_path, index_col=0)
         cv_results.columns = cv_results.columns.str.strip()
 
