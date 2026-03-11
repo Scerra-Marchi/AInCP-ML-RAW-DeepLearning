@@ -104,6 +104,7 @@ def build_signal_features(operation_type, D, ND):
         "raw_enmo",
         "raw_ai",
         "raw_ratio",
+        "raw_jerk",
         "raw_enmo_ai_ratio_jerk",
         "enmo_asymmetry",
         "enmo_asymmetry_jerk",
