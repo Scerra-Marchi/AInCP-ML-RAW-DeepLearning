@@ -241,6 +241,15 @@ def plot_dashboards(
         attr = np.asarray(attr).squeeze()
         if attr.ndim == 3:
             attr = attr[..., 0]
+        if attr.ndim == 1:
+            if attr.size == regressor_sequence.shape[1]:
+                attr = attr.reshape(1, -1)
+            elif attr.size == regressor_sequence.shape[0]:
+                attr = attr.reshape(-1, 1)
+            else:
+                attr = attr.reshape(regressor_sequence.shape)
+        elif attr.ndim == 0:
+            attr = attr.reshape(1, 1)
 
         abs_attr = np.abs(attr)
         time_importance = np.mean(abs_attr, axis=1)
