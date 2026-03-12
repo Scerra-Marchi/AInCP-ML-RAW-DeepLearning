@@ -31,10 +31,16 @@ SENSOR_FEATURE_EPS = 1e-6
 SENSOR_WINDOW_FEATURE_KEYS = (
     "enmo_mean_d",
     "enmo_mean_nd",
+    "enmo_std_d",
+    "enmo_std_nd",
+    "enmo_q90_d",
+    "enmo_q90_nd",
     "enmo_diff",
     "enmo_log_ratio",
     "signed_ai_enmo",
+    "abs_ai_enmo",
     "bilateral_enmo_mean",
+    "dominant_gt_nondominant",
     "jerk_mean_d",
     "jerk_mean_nd",
 )
@@ -45,13 +51,14 @@ PREPROCESSING_CONFIG = {
 }
 
 GRU_MODEL_PARAM_GRID = {
-    "model__lr": [0.1, 0.2],
+    "model__lr": [0.5, 0.1],
     "model__max_epochs": [500],
     "model__batch_size": [128],
-    "model__module__hidden_size": [128, 256],
-    "model__module__num_layers": [1, 2],
-    "model__module__dropout": [0.1, 0.25],
-    "model__optimizer__weight_decay": [0.0, 1e-3],
+    "model__module__hidden_size": [256, 384],
+    "model__module__num_layers": [2, 3],
+    "model__module__dropout": [0.1],
+    "model__module__readout_mode": ["mean", "attention"],
+    "model__optimizer__weight_decay": [0.0],
     "model__callbacks__early_stopping__patience": [25],
 }
 GRU_PARAM_GRID = [
@@ -109,10 +116,16 @@ def build_block_feature_names(n_features, n_estimators):
     names += [
         "block_enmo_mean_d",
         "block_enmo_mean_nd",
+        "block_enmo_std_d",
+        "block_enmo_std_nd",
+        "block_enmo_q90_d",
+        "block_enmo_q90_nd",
         "block_enmo_diff",
         "block_enmo_log_ratio",
         "block_signed_ai_enmo",
+        "block_abs_ai_enmo",
         "block_bilateral_enmo_mean",
+        "block_fraction_d_gt_nd",
         "block_jerk_mean_d",
         "block_jerk_mean_nd",
     ]

@@ -66,19 +66,30 @@ def compute_window_sensor_features(
 
     enmo_mean_d = enmo_d.mean(axis=1).astype(np.float32)
     enmo_mean_nd = enmo_nd.mean(axis=1).astype(np.float32)
+    enmo_std_d = enmo_d.std(axis=1).astype(np.float32)
+    enmo_std_nd = enmo_nd.std(axis=1).astype(np.float32)
+    enmo_q90_d = np.quantile(enmo_d, 0.90, axis=1).astype(np.float32)
+    enmo_q90_nd = np.quantile(enmo_nd, 0.90, axis=1).astype(np.float32)
     enmo_diff = (enmo_mean_d - enmo_mean_nd).astype(np.float32)
     bilateral_enmo_mean = (enmo_mean_d + enmo_mean_nd).astype(np.float32)
+    signed_ai_enmo = np.divide(
+        enmo_diff,
+        bilateral_enmo_mean + epsilon,
+    ).astype(np.float32)
 
     features = {
         "enmo_mean_d": enmo_mean_d,
         "enmo_mean_nd": enmo_mean_nd,
+        "enmo_std_d": enmo_std_d,
+        "enmo_std_nd": enmo_std_nd,
+        "enmo_q90_d": enmo_q90_d,
+        "enmo_q90_nd": enmo_q90_nd,
         "enmo_diff": enmo_diff,
         "enmo_log_ratio": compute_log_ratio(enmo_mean_d, enmo_mean_nd, epsilon=epsilon).astype(np.float32),
-        "signed_ai_enmo": np.divide(
-            enmo_diff,
-            bilateral_enmo_mean + epsilon,
-        ).astype(np.float32),
+        "signed_ai_enmo": signed_ai_enmo,
+        "abs_ai_enmo": np.abs(signed_ai_enmo).astype(np.float32),
         "bilateral_enmo_mean": bilateral_enmo_mean,
+        "dominant_gt_nondominant": (enmo_mean_d > enmo_mean_nd).astype(np.float32),
         "jerk_mean_d": jerk_d.mean(axis=1).astype(np.float32),
         "jerk_mean_nd": jerk_nd.mean(axis=1).astype(np.float32),
     }
