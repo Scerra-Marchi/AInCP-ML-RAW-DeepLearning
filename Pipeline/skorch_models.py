@@ -10,15 +10,21 @@ import os
 import random
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
+from torch.nn import functional as F
 from skorch import NeuralNetBinaryClassifier, NeuralNetRegressor
 from skorch.callbacks import Callback, EarlyStopping, EpochScoring
 from skorch.dataset import ValidSplit
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 DEFAULT_SEED = 42
+
+
+def _silent_sink(*args, **kwargs):
+    """Pickle-safe no-op callback sink for skorch logging hooks."""
+    return None
 
 
 def set_global_determinism(seed: int = DEFAULT_SEED) -> None:
@@ -51,7 +57,7 @@ class ResetSeedOnTrainBegin(Callback):
         set_global_determinism(self.seed)
 
 
-def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path):
+def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_path, yscale=None):
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
@@ -60,6 +66,8 @@ def plot_train_valid(history_df, x, train_col, valid_col, ylabel, title, save_pa
     ax.set_xlabel("Epoch")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
+    if yscale is not None:
+        ax.set_yscale(yscale)
     ax.legend()
     fig.tight_layout()
     fig.savefig(save_path)
@@ -86,6 +94,18 @@ def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
             "Loss During Training",
             os.path.join(stats_folder, "best_estimator_loss.png"),
         )
+        loss_values = history_df[["train_loss", "valid_loss"]].to_numpy(dtype=float)
+        if np.all(loss_values > 0):
+            plot_train_valid(
+                history_df,
+                x,
+                "train_loss",
+                "valid_loss",
+                loss_label,
+                "Loss During Training (Log Scale)",
+                os.path.join(stats_folder, "best_estimator_loss_log.png"),
+                yscale="log",
+            )
     if {"train_f1", "valid_f1"}.issubset(history_df.columns):
         plot_train_valid(
             history_df,
@@ -96,10 +116,104 @@ def save_best_estimator_plots(estimator, stats_folder, loss_label="Loss"):
             "F1 Macro During Training",
             os.path.join(stats_folder, "best_estimator_f1.png"),
         )
+    if {"train_r2", "valid_r2"}.issubset(history_df.columns):
+        plot_train_valid(
+            history_df,
+            x,
+            "train_r2",
+            "valid_r2",
+            "R2 Score",
+            "R2 During Training",
+            os.path.join(stats_folder, "best_estimator_r2.png"),
+        )
+
+
+class SequenceStandardScaler(BaseEstimator, TransformerMixin):
+    def __init__(self):
+        self.scaler = StandardScaler()
+
+    def _ensure_channel_axis(self, X):
+        X = np.asarray(X, dtype=np.float32)
+        squeezed = False
+        if X.ndim == 2:
+            X = X[..., None]
+            squeezed = True
+        if X.ndim != 3:
+            raise ValueError(f"SequenceStandardScaler expects 2D or 3D input, got shape {X.shape}.")
+        return X, squeezed
+
+    def fit(self, X, y=None):
+        X, _ = self._ensure_channel_axis(X)
+        self.scaler.fit(X.reshape(-1, X.shape[-1]))
+        return self
+
+    def transform(self, X):
+        X, squeezed = self._ensure_channel_axis(X)
+        X_scaled = self.scaler.transform(X.reshape(-1, X.shape[-1]))
+        X_scaled = X_scaled.reshape(X.shape).astype(np.float32)
+        if squeezed:
+            X_scaled = X_scaled[..., 0]
+        return X_scaled
+
+
+def make_regressor_net(module, module_kwargs=None, device=None):
+    module_kwargs = {} if module_kwargs is None else dict(module_kwargs)
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    return NeuralNetRegressor(
+        module=module,
+        callbacks=[
+            ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
+            (
+                "train_r2",
+                EpochScoring(
+                    scoring="r2",
+                    on_train=True,
+                    lower_is_better=False,
+                    name="train_r2",
+                    use_caching=False,
+                ),
+            ),
+            (
+                "valid_r2",
+                EpochScoring(
+                    scoring="r2",
+                    on_train=False,
+                    lower_is_better=False,
+                    name="valid_r2",
+                    use_caching=False,
+                ),
+            ),
+            (
+                "early_stopping",
+                EarlyStopping(
+                    monitor="valid_loss",
+                    threshold=1e-4,
+                    threshold_mode="rel",
+                    lower_is_better=True,
+                    sink=_silent_sink,
+                    load_best=True,
+                ),
+            ),
+        ],
+        criterion=nn.MSELoss,
+        optimizer=torch.optim.AdamW,
+        iterator_train__shuffle=True,
+        train_split=ValidSplit(0.2, random_state=42),
+        device=device,
+        verbose=0,
+        callbacks__print_log=None,
+        **{f"module__{k}": v for k, v in module_kwargs.items()},
+    )
 
 
 def make_bce_net(module):
+    if module is XGBoostSequenceClassifier:
+        return XGBoostSequenceClassifier()
+
     # Build a fresh skorch estimator each time to avoid shared mutable state across trials.
+    # Disable skorch's default PrintLog callback so estimator state does not capture
+    # a possibly patched `print` callable from Ray and remains quiet/picklable.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     net = NeuralNetBinaryClassifier(
         module=module,
@@ -130,6 +244,7 @@ def make_bce_net(module):
                     threshold=1e-4,
                     threshold_mode="rel",
                     lower_is_better=True,
+                    sink=_silent_sink,
                     load_best=True,
                 ),
             )
@@ -140,53 +255,10 @@ def make_bce_net(module):
         train_split=ValidSplit(0.2, stratified=True, random_state=42),
         device=device,
         verbose=0,
+        callbacks__print_log=None,
     )
     net.threshold = 0.5
     return net
-
-
-def make_gru_regressor_net(input_size):
-    # Build a fresh skorch regressor; variable hyperparameters are set by train_regressor.py grid search.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    return NeuralNetRegressor(
-        module=GRUSequenceRegressor,
-        module__input_size=input_size,
-        callbacks=[
-            ("deterministic_seed", ResetSeedOnTrainBegin(seed=DEFAULT_SEED)),
-            (
-                "early_stopping",
-                EarlyStopping(
-                    monitor="valid_loss",
-                    threshold=1e-4,
-                    threshold_mode="rel",
-                    lower_is_better=True,
-                    load_best=True,
-                ),
-            ),
-        ],
-        criterion=WeightedSequenceMSELoss,
-        optimizer=torch.optim.AdamW,
-        iterator_train__shuffle=True,
-        train_split=ValidSplit(0.2, random_state=42),
-        device=device,
-        verbose=0,
-    )
-
-
-class WeightedSequenceMSELoss(nn.Module):
-    def __init__(self, late_emphasis: float = 2.0):
-        super().__init__()
-        self.late_emphasis = late_emphasis
-
-    def forward(self, y_pred, y_true):
-        n_steps = y_pred.shape[1]
-        # Linearly increase timestep weight from 1.0 (early) to late_emphasis (late).
-        weights = torch.linspace(1.0, float(self.late_emphasis), n_steps, device=y_pred.device, dtype=y_pred.dtype)
-        weights = weights / weights.mean()
-        y_true_seq = y_true.unsqueeze(1).expand(-1, n_steps, -1)
-
-        sq_err = (y_pred - y_true_seq) ** 2
-        return (sq_err * weights.view(1, -1, 1)).mean()
 
 
 class LSTMSequenceClassifier(nn.Module):
@@ -355,39 +427,94 @@ class GRUSequenceRegressor(nn.Module):
     def __init__(
         self,
         *,
-        input_size: int,
+        input_size: int | None = None,
         hidden_size: int = 64,
         num_layers: int = 1,
         dropout: float = 0.0,
         return_last_step: bool = False,
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.return_last_step = return_last_step
+        self.readout_mode = readout_mode
 
+        self.input_size = input_size
+        self.gru = None
+        self.skip = None
+        self.regressor = nn.Linear(hidden_size, 1)
+        self.attention = nn.Linear(hidden_size, 1) if self.readout_mode == "attention" else None
+
+        if self.input_size is not None:
+            self._build_layers(self.input_size, torch.device("cpu"))
+
+    def _build_layers(self, input_size, device):
         self.gru = nn.GRU(
             input_size=input_size,
             hidden_size=self.hidden_size,
             num_layers=self.num_layers,
             dropout=self.dropout if self.num_layers > 1 else 0.0,
             batch_first=True,
-        )
-        self.skip = nn.Linear(input_size, 1)
-        self.regressor = nn.Linear(hidden_size, 1)
+        ).to(device)
+        self.skip = nn.Linear(input_size, 1).to(device)
+
+    def _pool_hidden_states(self, out, skip_out):
+        if self.readout_mode == "last":
+            return out[:, -1], skip_out[:, -1]
+        if self.readout_mode == "mean":
+            return out.mean(dim=1), skip_out.mean(dim=1)
+        if self.readout_mode == "max":
+            pooled_out = out.max(dim=1).values
+            pooled_skip = skip_out.max(dim=1).values
+            return pooled_out, pooled_skip
+        if self.readout_mode == "attention":
+            scores = self.attention(out).squeeze(-1)
+            weights = torch.softmax(scores, dim=1)
+            pooled_out = torch.bmm(weights.unsqueeze(1), out).squeeze(1)
+            pooled_skip = torch.bmm(weights.unsqueeze(1), skip_out).squeeze(1)
+            return pooled_out, pooled_skip
+        raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
+
+    def _sequence_predictions(self, out, skip_out):
+        if self.readout_mode == "last":
+            return self.regressor(out) + skip_out
+        if self.readout_mode == "mean":
+            pooled_out = out.cumsum(dim=1) / torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
+            pooled_skip = skip_out.cumsum(dim=1) / torch.arange(1, skip_out.shape[1] + 1, device=skip_out.device, dtype=skip_out.dtype).view(1, -1, 1)
+            return self.regressor(pooled_out) + pooled_skip
+        if self.readout_mode == "max":
+            pooled_out = out.cummax(dim=1).values
+            pooled_skip = skip_out.cummax(dim=1).values
+            return self.regressor(pooled_out) + pooled_skip
+        if self.readout_mode == "attention":
+            scores = self.attention(out).squeeze(-1)
+            t_steps = out.shape[1]
+            causal_mask = torch.tril(torch.ones(t_steps, t_steps, device=out.device, dtype=torch.bool))
+            score_matrix = scores.unsqueeze(1).expand(-1, t_steps, -1)
+            score_matrix = score_matrix.masked_fill(~causal_mask.unsqueeze(0), float("-inf"))
+            weights = torch.softmax(score_matrix, dim=-1)
+            pooled_out = torch.bmm(weights, out)
+            pooled_skip = torch.bmm(weights, skip_out)
+            return self.regressor(pooled_out) + pooled_skip
+        raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
 
     def forward(self, x):
         x = x.float()
         if x.ndim == 2:
             x = x.unsqueeze(-1)
 
+        if self.gru is None or self.skip is None:
+            self._build_layers(x.shape[-1], x.device)
+
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
         skip_out = self.skip(x)
         if self.return_last_step:
-            return self.regressor(out[:, -1]) + skip_out[:, -1]
-        return self.regressor(out) + skip_out
+            pooled_out, pooled_skip = self._pool_hidden_states(out, skip_out)
+            return self.regressor(pooled_out) + pooled_skip
+        return self._sequence_predictions(out, skip_out)
 
 
 def _flatten_windows(X):
@@ -463,10 +590,6 @@ class XGBoostSequenceClassifier(BaseEstimator, ClassifierMixin):
     def predict(self, X):
         X = _flatten_windows(X)
         return self.model_.predict(X)
-
-
-def make_xgboost_classifier():
-    return XGBoostSequenceClassifier()
 
 
 class Conv1DSequenceClassifier(nn.Module):

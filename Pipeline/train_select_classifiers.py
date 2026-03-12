@@ -13,6 +13,7 @@ import hashlib
 import pandas as pd
 
 import torch
+from sklearn.pipeline import Pipeline
 from skorch_models import (
     LSTMSequenceClassifier,
     GRUSequenceClassifier,
@@ -20,9 +21,10 @@ from skorch_models import (
     Conv1DSequenceClassifier,
     MLPSequenceClassifier,
     ReservoirSequenceClassifier,
+    SequenceStandardScaler,
     TransformerSequenceClassifier,
+    XGBoostSequenceClassifier,
     make_bce_net,
-    make_xgboost_classifier,
     set_global_determinism,
 )
 from ray.tune import TuneConfig
@@ -35,6 +37,7 @@ MODULE_CLASS_BY_NAME = {
     "CNN1D": Conv1DSequenceClassifier,
     "Transformer": TransformerSequenceClassifier,
     "Reservoir": ReservoirSequenceClassifier,
+    "XGBoost": XGBoostSequenceClassifier,
 }
 DEFAULT_MODEL_NAMES = tuple(MODULE_CLASS_BY_NAME.keys())
 
@@ -54,7 +57,7 @@ def train_select_classifiers(
     save_folder,
     metadata,
     l_window_size=[300, 600, 900],
-    l_method=["concat", "difference", "ai"],
+    l_method=["raw"],
     l_decimation_factor=[3],
     l_model_name=DEFAULT_MODEL_NAMES,
 ):
@@ -68,126 +71,116 @@ def train_select_classifiers(
         {
             "name": "LSTM",
             "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False, True],
+                "model__optimizer__weight_decay": [1e-4],
+                "model__lr": [1e-2, 1e-3],
+                "model__max_epochs": [500],
+                "model__batch_size": [128],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__hidden_size": [128],
+                "model__module__num_layers": [1],
+                "model__module__dropout": [0.1],
+                "model__module__bidirectional": [True],
             },
         },
         {
             "name": "GRU",
             "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False, True],
+                "model__optimizer__weight_decay": [1e-4],
+                "model__lr": [3e-4, 1e-3],
+                "model__max_epochs": [500],
+                "model__batch_size": [128],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__hidden_size": [32, 64, 96],
+                "model__module__num_layers": [1, 2],
+                "model__module__dropout": [0.0, 0.2],
+                "model__module__bidirectional": [False, True],
             },
         },
         {
             "name": "RNN",
             "param_grid": {
-                "optimizer__weight_decay": [0.0, 1e-4],
-                "lr": [3e-4, 1e-3],
-                "max_epochs": [200],
-                "batch_size": [128],
-                "callbacks__early_stopping__patience": [25],
-                "module__hidden_size": [32, 64],
-                "module__num_layers": [1, 2],
-                "module__dropout": [0.0, 0.2],
-                "module__bidirectional": [False],
-                "module__nonlinearity": ["tanh", "relu"],
+                "model__optimizer__weight_decay": [1e-4],
+                "model__lr": [3e-4, 1e-3],
+                "model__max_epochs": [500],
+                "model__batch_size": [128],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__hidden_size": [32, 64, 96],
+                "model__module__num_layers": [1, 2],
+                "model__module__dropout": [0.0, 0.2],
+                "model__module__bidirectional": [False],
+                "model__module__nonlinearity": ["tanh", "relu"],
             },
         },
         {
             "name": "NeuralNet",
-            "param_grid": [
-                {
-                    "optimizer__weight_decay": [1e-3],
-                    "lr": [1e-3],
-                    "max_epochs": [150],
-                    "batch_size": [128],
-                    "callbacks__early_stopping__patience": [20],
-                    "module__hidden_size": [128],
-                    "module__num_layers": [2],
-                    "module__dropout": [0.2],
-                },
-            ],
+            "param_grid": {
+                "model__optimizer__weight_decay": [1e-3, 2e-3],
+                "model__lr": [5e-4, 7e-4],
+                "model__max_epochs": [500],
+                "model__batch_size": [128],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__hidden_size": [128, 160],
+                "model__module__num_layers": [1, 2, 3],
+                "model__module__dropout": [0.1, 0.25],
+            },
         },
         {
             "name": "Transformer",
-            "param_grid": [
-                {
-                    "optimizer__weight_decay": [1e-4],
-                    "lr": [7e-5],
-                    "max_epochs": [300],
-                    "batch_size": [96],
-                    "callbacks__early_stopping__patience": [40],
-                    "module__d_model": [256],
-                    "module__nhead": [8],
-                    "module__num_layers": [4],
-                    "module__dim_feedforward": [1024],
-                    "module__dropout": [0.1],
-                    "module__patch_size": [16],
-                }
-            ],
+            "param_grid": {
+                "model__optimizer__weight_decay": [1e-4],
+                "model__lr": [3e-5, 1e-4, 2e-4],
+                "model__max_epochs": [500],
+                "model__batch_size": [64, 128],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__d_model": [96, 128],
+                "model__module__nhead": [4],
+                "model__module__num_layers": [2, 3],
+                "model__module__dim_feedforward": [128, 256, 384],
+                "model__module__dropout": [0.1, 0.25],
+                "model__module__patch_size": [16, 32],
+            },
         },
         {
             "name": "XGBoost",
-            "param_grid": [
-                {
-                    "n_estimators": [180],
-                    "max_depth": [2],
-                    "learning_rate": [0.1],
-                    "subsample": [0.85],
-                    "colsample_bytree": [0.7],
-                    "min_child_weight": [4.0],
-                    "reg_alpha": [0.3],
-                    "reg_lambda": [6.0],
-                    "gamma": [0.1],
-                }
-            ],
+            "param_grid": {
+                "model__n_estimators": [80, 120],
+                "model__max_depth": [1, 2],
+                "model__learning_rate": [0.03, 0.05],
+                "model__subsample": [0.75],
+                "model__colsample_bytree": [0.65],
+                "model__min_child_weight": [5.0, 10.0],
+                "model__reg_alpha": [0.0],
+                "model__reg_lambda": [4.0, 8.0],
+                "model__gamma": [0.0, 0.3],
+            },
         },
         {
             "name": "CNN1D",
-            "param_grid": [
-                {
-                    "optimizer__weight_decay": [1e-4],
-                    "lr": [8e-4],
-                    "max_epochs": [450],
-                    "batch_size": [48],
-                    "callbacks__early_stopping__patience": [70],
-                    "module__channels": [320],
-                    "module__kernel_size": [7],
-                    "module__dropout": [0.15],
-                }
-            ],
+            "param_grid": {
+                "model__optimizer__weight_decay": [1e-5, 1e-4],
+                "model__lr": [3e-4, 6e-4],
+                "model__max_epochs": [500],
+                "model__batch_size": [48],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__channels": [256, 512],
+                "model__module__kernel_size": [3, 5, 7],
+                "model__module__dropout": [0.0, 0.1],
+            },
         },
         {
             "name": "Reservoir",
-            "param_grid": [
-                {
-                    "optimizer__weight_decay": [0.0],
-                    "lr": [2e-4],
-                    "max_epochs": [360],
-                    "batch_size": [96],
-                    "callbacks__early_stopping__patience": [50],
-                    "module__reservoir_size": [2800],
-                    "module__spectral_radius": [1.0],
-                    "module__leak_rate": [0.7],
-                    "module__input_scaling": [0.8],
-                    "module__downsample": [16],
-                }
-            ],
+            "param_grid": {
+                "model__optimizer__weight_decay": [0.0],
+                "model__lr": [4e-4, 8e-4],
+                "model__max_epochs": [500],
+                "model__batch_size": [128],
+                "model__callbacks__early_stopping__patience": [10],
+                "model__module__reservoir_size": [400, 700],
+                "model__module__spectral_radius": [0.9],
+                "model__module__leak_rate": [0.85, 0.95],
+                "model__module__input_scaling": [0.35, 0.5],
+                "model__module__downsample": [8, 16],
+            },
         },
     ]
 
@@ -268,11 +261,13 @@ def train_select_classifiers(
         # Import inside the Ray worker after chdir so local imports work.
         from train_best_model import train_best_model
 
-        if gridsearch_specs["name"] == "XGBoost":
-            estimator = make_xgboost_classifier()
-        else:
-            module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
-            estimator = make_bce_net(module)
+        module = MODULE_CLASS_BY_NAME[gridsearch_specs["name"]]
+        estimator = Pipeline(
+            [
+                ("scaler", SequenceStandardScaler()),
+                ("model", make_bce_net(module)),
+            ]
+        )
 
         train_best_model(
             data_folder=data_folder,

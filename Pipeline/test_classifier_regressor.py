@@ -4,7 +4,10 @@ import pandas as pd
 import joblib as jl
 from sklearn.metrics import r2_score
 from predict_samples import build_estimators_list, predict_samples
-from train_regressor import regressor_model_path, build_regressor_sequence
+from train_regressor import (
+    build_regressor_sample,
+    regressor_model_path,
+)
 
 def test_classifier_regressor(
     data_folder,
@@ -30,7 +33,7 @@ def test_classifier_regressor(
 
     hp_tot_list_list = []
     hard_pred_tot_list_list = []
-    sequence_list = []
+    raw_inputs = []
     
     for _, subject_metadata in metadata.iterrows():
         y_list, hp_tot, invalid_bitmap = predict_samples(
@@ -39,7 +42,17 @@ def test_classifier_regressor(
             subject_metadata,
         )
         hp_tot_list_list.append(hp_tot)
-        sequence_list.append(build_regressor_sequence(y_list, invalid_bitmap, window_size, decimation_factor))
+        raw_inputs.append(
+            build_regressor_sample(
+                data_folder,
+                estimators_list,
+                subject_metadata,
+                input_type="week",
+                predictions_list=y_list,
+                invalid_bitmap=invalid_bitmap,
+            )
+        )
+        invalid_bitmap = np.asarray(invalid_bitmap, dtype=np.uint8)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         hard_pred_tot_list_list.append([
             float((np.asarray(probs, dtype=float)[~invalid_mask] >= 0.5).mean())
@@ -58,7 +71,7 @@ def test_classifier_regressor(
     #    x.append(hp_tot[0])
     #    y.append(subject_metadata['AHA'])
 
-    X_seq = np.stack(sequence_list).astype(np.float32)
+    X_raw = np.asarray(raw_inputs, dtype=object)
     y = np.array(metadata['AHA'].values, dtype=float)
 
     hp_tot_array = np.asarray(hp_tot_list_list, dtype=float)
@@ -84,18 +97,18 @@ def test_classifier_regressor(
         save_folder=save_folder,
         estimators_list=estimators_list,
     )
-    regressor = jl.load(model_path)
-    y_pred = np.asarray(regressor.predict(X_seq), dtype=float)[:, -1, 0]
+    gru_regressor = jl.load(model_path)
+    y_pred_gru = np.asarray(gru_regressor.predict(X_raw), dtype=float).reshape(-1)
 
     data_regression = {
         "Regressor path": model_path,
-        "R2 Score": r2_score(y, y_pred),
+        "R2 Score": r2_score(y, y_pred_gru),
         "Classifiers Used": model_params_list
     }
 
     data_test = {
         "Selected Classifiers Stats": classifiers_stats,
-        "Regressor Stats": data_regression
+        "GRU Regressor Stats": data_regression,
     }
 
     # Writing to a JSON file

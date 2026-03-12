@@ -21,8 +21,19 @@ DATA_FOLDER = "../Dataset/"
 
 WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
 DECIMATION_FACTOR = 3
-MODEL_NAMES = ["NeuralNet", "XGBoost", "CNN1D", "Transformer", "Reservoir"]
-METHODS = ["raw"] # Also available: "concat", "difference", "ai"
+MODEL_NAMES = ["Transformer"]
+METHODS = [
+    "raw",
+    "raw_enmo_ai_ratio_jerk",
+    "raw_enmo",
+    "raw_ai",
+    "raw_ratio",
+    "raw_jerk",
+    "enmo_ai",
+    "enmo_jerk",
+    "enmo_asymmetry",
+    "enmo_asymmetry_jerk",
+]
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
 # With f1_macro scoring, values are in [0, 1], and higher is better.
@@ -30,7 +41,7 @@ DEFAULT_ITERATIONS = TOTAL_FOLDS
 # - Random guesser (rough baseline): ~0.50 on balanced classes (can be lower if imbalanced).
 # - Decent classifier: >= 0.60.
 # - Good classifier: >= 0.75.
-CV_MIN_MEAN_TEST_SCORE = 0.7
+CV_MIN_MEAN_TEST_SCORE = 0.85
 DEBUG_MIN_MEAN_TEST_SCORE = 0.0
 
 
@@ -87,31 +98,28 @@ def _run_iteration(
         min_mean_test_score=min_mean_test_score,
         window_size=window_size,
         decimation_factor=decimation_factor,
+        regressor_device="cuda:2",
     )
 
-    combined_test_stats = os.path.join(save_folder, "combined_test_stats.json")
-    if not os.path.exists(combined_test_stats):
-        print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
-        test_classifier_regressor(
-            data_folder,
-            save_folder=save_folder,
-            metadata=test_metadata.copy(),
-            min_mean_test_score=min_mean_test_score,
-            window_size=window_size,
-            decimation_factor=decimation_factor,
-        )
+    print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
+    test_classifier_regressor(
+        data_folder,
+        save_folder=save_folder,
+        metadata=test_metadata.copy(),
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
 
-    predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
-    if not os.path.exists(predictions_df):
-        print(" ----- CREATING DASHBOARDS ----- ")
-        plot_dashboards(
-            data_folder,
-            save_folder=save_folder,
-            metadata=test_metadata.copy(),
-            min_mean_test_score=min_mean_test_score,
-            window_size=window_size,
-            decimation_factor=decimation_factor,
-        )
+    print(" ----- CREATING DASHBOARDS ----- ")
+    plot_dashboards(
+        data_folder,
+        save_folder=save_folder,
+        metadata=test_metadata.copy(),
+        min_mean_test_score=min_mean_test_score,
+        window_size=window_size,
+        decimation_factor=decimation_factor,
+    )
 
 
 def _iteration_done(save_folder: str) -> bool:
@@ -153,7 +161,7 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
             continue
         with open(json_file_path, "r") as json_file:
             data = json.load(json_file)
-        r2_list.append(data["Regressor Stats"]["R2 Score"])
+        r2_list.append(data["GRU Regressor Stats"]["R2 Score"])
         corrcoef_list.append(
             data["Selected Classifiers Stats"][0]["Correlation Mean Probability vs AHA"]
         )
