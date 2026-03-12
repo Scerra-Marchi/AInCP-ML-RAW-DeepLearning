@@ -432,17 +432,20 @@ class GRUSequenceRegressor(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         return_last_step: bool = False,
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.return_last_step = return_last_step
+        self.readout_mode = readout_mode
 
         self.input_size = input_size
         self.gru = None
         self.skip = None
         self.regressor = nn.Linear(hidden_size, 1)
+        self.attention = nn.Linear(hidden_size, 1) if self.readout_mode == "attention" else None
 
         if self.input_size is not None:
             self._build_layers(self.input_size, torch.device("cpu"))
@@ -457,6 +460,46 @@ class GRUSequenceRegressor(nn.Module):
         ).to(device)
         self.skip = nn.Linear(input_size, 1).to(device)
 
+    def _pool_hidden_states(self, out, skip_out):
+        if self.readout_mode == "last":
+            return out[:, -1], skip_out[:, -1]
+        if self.readout_mode == "mean":
+            return out.mean(dim=1), skip_out.mean(dim=1)
+        if self.readout_mode == "max":
+            pooled_out = out.max(dim=1).values
+            pooled_skip = skip_out.max(dim=1).values
+            return pooled_out, pooled_skip
+        if self.readout_mode == "attention":
+            scores = self.attention(out).squeeze(-1)
+            weights = torch.softmax(scores, dim=1)
+            pooled_out = torch.bmm(weights.unsqueeze(1), out).squeeze(1)
+            pooled_skip = torch.bmm(weights.unsqueeze(1), skip_out).squeeze(1)
+            return pooled_out, pooled_skip
+        raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
+
+    def _sequence_predictions(self, out, skip_out):
+        if self.readout_mode == "last":
+            return self.regressor(out) + skip_out
+        if self.readout_mode == "mean":
+            pooled_out = out.cumsum(dim=1) / torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
+            pooled_skip = skip_out.cumsum(dim=1) / torch.arange(1, skip_out.shape[1] + 1, device=skip_out.device, dtype=skip_out.dtype).view(1, -1, 1)
+            return self.regressor(pooled_out) + pooled_skip
+        if self.readout_mode == "max":
+            pooled_out = out.cummax(dim=1).values
+            pooled_skip = skip_out.cummax(dim=1).values
+            return self.regressor(pooled_out) + pooled_skip
+        if self.readout_mode == "attention":
+            scores = self.attention(out).squeeze(-1)
+            t_steps = out.shape[1]
+            causal_mask = torch.tril(torch.ones(t_steps, t_steps, device=out.device, dtype=torch.bool))
+            score_matrix = scores.unsqueeze(1).expand(-1, t_steps, -1)
+            score_matrix = score_matrix.masked_fill(~causal_mask.unsqueeze(0), float("-inf"))
+            weights = torch.softmax(score_matrix, dim=-1)
+            pooled_out = torch.bmm(weights, out)
+            pooled_skip = torch.bmm(weights, skip_out)
+            return self.regressor(pooled_out) + pooled_skip
+        raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
+
     def forward(self, x):
         x = x.float()
         if x.ndim == 2:
@@ -469,8 +512,9 @@ class GRUSequenceRegressor(nn.Module):
         out, _ = self.gru(x)
         skip_out = self.skip(x)
         if self.return_last_step:
-            return self.regressor(out[:, -1]) + skip_out[:, -1]
-        return self.regressor(out) + skip_out
+            pooled_out, pooled_skip = self._pool_hidden_states(out, skip_out)
+            return self.regressor(pooled_out) + pooled_skip
+        return self._sequence_predictions(out, skip_out)
 
 
 def _flatten_windows(X):

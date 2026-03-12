@@ -344,7 +344,7 @@ def _fit_pipeline_with_grid_search(
             refit=True,
             n_jobs=1,
             return_train_score=True,
-            verbose=1,
+            verbose=2,
         )
         grid.fit(X_raw, y)
         best_estimator = grid.best_estimator_
