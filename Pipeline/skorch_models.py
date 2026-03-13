@@ -20,6 +20,7 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 DEFAULT_SEED = 42
+AHA_TARGET_SCALE = 100.0
 
 
 def _silent_sink(*args, **kwargs):
@@ -444,7 +445,7 @@ class GRUSequenceRegressor(nn.Module):
         self.input_size = input_size
         self.gru = None
         self.skip = None
-        self.regressor = nn.Linear(hidden_size, 1)
+        self.regressor = nn.Linear(hidden_size, 2)
         self.attention = nn.Linear(hidden_size, 1) if self.readout_mode == "attention" else None
 
         if self.input_size is not None:
@@ -458,7 +459,12 @@ class GRUSequenceRegressor(nn.Module):
             dropout=self.dropout if self.num_layers > 1 else 0.0,
             batch_first=True,
         ).to(device)
-        self.skip = nn.Linear(input_size, 1).to(device)
+        self.skip = nn.Linear(input_size, 2).to(device)
+
+    def _decode_soft_aha(self, raw_outputs):
+        healthy_probability = torch.sigmoid(raw_outputs[..., 0])
+        affected_aha = torch.sigmoid(raw_outputs[..., 1]) * AHA_TARGET_SCALE
+        return healthy_probability * AHA_TARGET_SCALE + (1.0 - healthy_probability) * affected_aha
 
     def _pool_hidden_states(self, out, skip_out):
         if self.readout_mode == "last":
@@ -479,15 +485,15 @@ class GRUSequenceRegressor(nn.Module):
 
     def _sequence_predictions(self, out, skip_out):
         if self.readout_mode == "last":
-            return self.regressor(out) + skip_out
+            return self._decode_soft_aha(self.regressor(out) + skip_out)
         if self.readout_mode == "mean":
             pooled_out = out.cumsum(dim=1) / torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
             pooled_skip = skip_out.cumsum(dim=1) / torch.arange(1, skip_out.shape[1] + 1, device=skip_out.device, dtype=skip_out.dtype).view(1, -1, 1)
-            return self.regressor(pooled_out) + pooled_skip
+            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
         if self.readout_mode == "max":
             pooled_out = out.cummax(dim=1).values
             pooled_skip = skip_out.cummax(dim=1).values
-            return self.regressor(pooled_out) + pooled_skip
+            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
         if self.readout_mode == "attention":
             scores = self.attention(out).squeeze(-1)
             t_steps = out.shape[1]
@@ -497,7 +503,7 @@ class GRUSequenceRegressor(nn.Module):
             weights = torch.softmax(score_matrix, dim=-1)
             pooled_out = torch.bmm(weights, out)
             pooled_skip = torch.bmm(weights, skip_out)
-            return self.regressor(pooled_out) + pooled_skip
+            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
         raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
 
     def forward(self, x):
@@ -513,7 +519,7 @@ class GRUSequenceRegressor(nn.Module):
         skip_out = self.skip(x)
         if self.return_last_step:
             pooled_out, pooled_skip = self._pool_hidden_states(out, skip_out)
-            return self.regressor(pooled_out) + pooled_skip
+            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
         return self._sequence_predictions(out, skip_out)
 
 
