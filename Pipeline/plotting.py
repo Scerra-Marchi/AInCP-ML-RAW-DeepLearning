@@ -27,6 +27,25 @@ def _transform_regressor_input_for_shap(regressor, model_input):
     return regressor_sequence, regressor_sequence_scaled
 
 
+def _enable_regressor_shap_output(net):
+    previous_return_last_step = getattr(net, "return_last_step", None)
+    previous_keep_output_dim = getattr(net, "keep_output_dim", None)
+
+    if previous_return_last_step is not None:
+        net.return_last_step = True
+    if previous_keep_output_dim is not None:
+        net.keep_output_dim = True
+
+    return previous_return_last_step, previous_keep_output_dim
+
+
+def _restore_regressor_output_flags(net, previous_return_last_step, previous_keep_output_dim):
+    if previous_return_last_step is not None:
+        net.return_last_step = previous_return_last_step
+    if previous_keep_output_dim is not None:
+        net.keep_output_dim = previous_keep_output_dim
+
+
 def _build_regressor_shap_explainer(
     *,
     regressor,
@@ -44,14 +63,11 @@ def _build_regressor_shap_explainer(
     ).astype(np.float32)
     background_tensor = torch.tensor(background_sequence_scaled, dtype=torch.float32).to(device)
 
-    prev_return_last_step = getattr(net, "return_last_step", None)
-    if prev_return_last_step is not None:
-        net.return_last_step = True
+    previous_return_last_step, previous_keep_output_dim = _enable_regressor_shap_output(net)
     try:
         return shap.GradientExplainer(net, background_tensor)
     finally:
-        if prev_return_last_step is not None:
-            net.return_last_step = prev_return_last_step
+        _restore_regressor_output_flags(net, previous_return_last_step, previous_keep_output_dim)
 
 
 def _regressor_timeline_context(
@@ -228,14 +244,11 @@ def plot_dashboards(
         #################### EXPLAINABILITY ####################
 
         x = torch.tensor(regressor_sequence_scaled, dtype=torch.float32).unsqueeze(0).to(device)
-        prev_return_last_step = getattr(net, "return_last_step", None)
-        if prev_return_last_step is not None:
-            net.return_last_step = True
+        previous_return_last_step, previous_keep_output_dim = _enable_regressor_shap_output(net)
         try:
             shap_values = explainer.shap_values(x)
         finally:
-            if prev_return_last_step is not None:
-                net.return_last_step = prev_return_last_step
+            _restore_regressor_output_flags(net, previous_return_last_step, previous_keep_output_dim)
 
         attr = shap_values[0] if isinstance(shap_values, list) else shap_values
         attr = np.asarray(attr).squeeze()
