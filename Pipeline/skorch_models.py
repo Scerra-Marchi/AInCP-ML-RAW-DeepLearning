@@ -483,17 +483,17 @@ class GRUSequenceRegressor(nn.Module):
             return pooled_out, pooled_skip
         raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
 
-    def _sequence_predictions(self, out, skip_out):
+    def _causal_pooled_hidden_states(self, out, skip_out):
+        # Prefix-causal pooling: prediction at time t uses only steps <= t.
         if self.readout_mode == "last":
-            return self._decode_soft_aha(self.regressor(out) + skip_out)
+            return out, skip_out
         if self.readout_mode == "mean":
-            pooled_out = out.cumsum(dim=1) / torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
-            pooled_skip = skip_out.cumsum(dim=1) / torch.arange(1, skip_out.shape[1] + 1, device=skip_out.device, dtype=skip_out.dtype).view(1, -1, 1)
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            denom = torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
+            pooled_out = out.cumsum(dim=1) / denom
+            pooled_skip = skip_out.cumsum(dim=1) / denom
+            return pooled_out, pooled_skip
         if self.readout_mode == "max":
-            pooled_out = out.cummax(dim=1).values
-            pooled_skip = skip_out.cummax(dim=1).values
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            return out.cummax(dim=1).values, skip_out.cummax(dim=1).values
         if self.readout_mode == "attention":
             scores = self.attention(out).squeeze(-1)
             t_steps = out.shape[1]
@@ -503,8 +503,12 @@ class GRUSequenceRegressor(nn.Module):
             weights = torch.softmax(score_matrix, dim=-1)
             pooled_out = torch.bmm(weights, out)
             pooled_skip = torch.bmm(weights, skip_out)
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            return pooled_out, pooled_skip
         raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
+
+    def _sequence_predictions(self, out, skip_out):
+        pooled_out, pooled_skip = self._causal_pooled_hidden_states(out, skip_out)
+        return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
 
     def forward(self, x):
         x = x.float()
