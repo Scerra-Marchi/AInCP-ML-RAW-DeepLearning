@@ -434,6 +434,7 @@ class GRUSequenceRegressor(nn.Module):
         dropout: float = 0.0,
         return_last_step: bool = False,
         readout_mode: str = "last",
+        keep_output_dim: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -441,6 +442,7 @@ class GRUSequenceRegressor(nn.Module):
         self.dropout = dropout
         self.return_last_step = return_last_step
         self.readout_mode = readout_mode
+        self.keep_output_dim = keep_output_dim
 
         self.input_size = input_size
         self.gru = None
@@ -465,7 +467,10 @@ class GRUSequenceRegressor(nn.Module):
         healthy_probability = torch.sigmoid(raw_outputs[..., 0])
         affected_severity = torch.sigmoid(raw_outputs[..., 1]) * AHA_TARGET_SCALE
         severity = (1.0 - healthy_probability) * affected_severity
-        return AHA_TARGET_SCALE - severity
+        aha = AHA_TARGET_SCALE - severity
+        if self.keep_output_dim:
+            return aha.unsqueeze(-1)
+        return aha
 
     def _pool_hidden_states(self, out, skip_out):
         if self.readout_mode == "last":

@@ -49,7 +49,7 @@ PREPROCESSING_CONFIG = {
 }
 
 GRU_MODEL_PARAM_GRID = {
-    "model__lr": [0.05, 0.1],
+    "model__lr": [0.05, 0.1, 0.5],
     "model__max_epochs": [500],
     "model__batch_size": [128],
     "model__module__hidden_size": [256, 512],
