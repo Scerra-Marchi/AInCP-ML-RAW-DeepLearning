@@ -461,10 +461,11 @@ class GRUSequenceRegressor(nn.Module):
         ).to(device)
         self.skip = nn.Linear(input_size, 2).to(device)
 
-    def _decode_soft_aha(self, raw_outputs):
+    def _decode_soft_aha_from_severity(self, raw_outputs):
         healthy_probability = torch.sigmoid(raw_outputs[..., 0])
-        affected_aha = torch.sigmoid(raw_outputs[..., 1]) * AHA_TARGET_SCALE
-        return healthy_probability * AHA_TARGET_SCALE + (1.0 - healthy_probability) * affected_aha
+        affected_severity = torch.sigmoid(raw_outputs[..., 1]) * AHA_TARGET_SCALE
+        severity = (1.0 - healthy_probability) * affected_severity
+        return AHA_TARGET_SCALE - severity
 
     def _pool_hidden_states(self, out, skip_out):
         if self.readout_mode == "last":
@@ -508,7 +509,7 @@ class GRUSequenceRegressor(nn.Module):
 
     def _sequence_predictions(self, out, skip_out):
         pooled_out, pooled_skip = self._causal_pooled_hidden_states(out, skip_out)
-        return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+        return self._decode_soft_aha_from_severity(self.regressor(pooled_out) + pooled_skip)
 
     def forward(self, x):
         x = x.float()
@@ -523,7 +524,7 @@ class GRUSequenceRegressor(nn.Module):
         skip_out = self.skip(x)
         if self.return_last_step:
             pooled_out, pooled_skip = self._pool_hidden_states(out, skip_out)
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            return self._decode_soft_aha_from_severity(self.regressor(pooled_out) + pooled_skip)
         return self._sequence_predictions(out, skip_out)
 
 
