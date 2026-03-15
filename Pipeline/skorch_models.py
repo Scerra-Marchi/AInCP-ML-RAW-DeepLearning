@@ -157,6 +157,22 @@ class SequenceStandardScaler(BaseEstimator, TransformerMixin):
         return X_scaled
 
 
+def _pool_sequence_hidden_states(out, readout_mode: str, attention: nn.Module | None = None):
+    if readout_mode == "last":
+        return out[:, -1]
+    if readout_mode == "mean":
+        return out.mean(dim=1)
+    if readout_mode == "max":
+        return out.max(dim=1).values
+    if readout_mode == "attention":
+        if attention is None:
+            raise ValueError("attention module is required when readout_mode='attention'.")
+        scores = attention(out).squeeze(-1)
+        weights = torch.softmax(scores, dim=1)
+        return torch.bmm(weights.unsqueeze(1), out).squeeze(1)
+    raise ValueError(f"Unsupported readout_mode: {readout_mode}")
+
+
 def make_regressor_net(module, module_kwargs=None, device=None):
     module_kwargs = {} if module_kwargs is None else dict(module_kwargs)
     if device is None:
@@ -270,16 +286,19 @@ class LSTMSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.readout_mode = readout_mode
 
         self.lstm = None
         direction_factor = 2 if bidirectional else 1
         self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        self.attention = nn.Linear(hidden_size * direction_factor, 1) if self.readout_mode == "attention" else None
 
     def _build_lstm(self, input_size, device):
         self.lstm = nn.LSTM(
@@ -301,7 +320,8 @@ class LSTMSequenceClassifier(nn.Module):
 
         self.lstm.flatten_parameters()
         out, _ = self.lstm(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        pooled = _pool_sequence_hidden_states(out, self.readout_mode, self.attention)
+        return self.classifier(pooled).squeeze(-1)
 
 
 class RNNSequenceClassifier(nn.Module):
@@ -313,6 +333,7 @@ class RNNSequenceClassifier(nn.Module):
         dropout: float = 0.0,
         bidirectional: bool = False,
         nonlinearity: str = "tanh",
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -320,10 +341,12 @@ class RNNSequenceClassifier(nn.Module):
         self.dropout = dropout
         self.bidirectional = bidirectional
         self.nonlinearity = nonlinearity
+        self.readout_mode = readout_mode
 
         self.rnn = None
         direction_factor = 2 if bidirectional else 1
         self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        self.attention = nn.Linear(hidden_size * direction_factor, 1) if self.readout_mode == "attention" else None
 
     def _build_rnn(self, input_size, device):
         self.rnn = nn.RNN(
@@ -346,7 +369,8 @@ class RNNSequenceClassifier(nn.Module):
 
         self.rnn.flatten_parameters()
         out, _ = self.rnn(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        pooled = _pool_sequence_hidden_states(out, self.readout_mode, self.attention)
+        return self.classifier(pooled).squeeze(-1)
 
 
 class MLPSequenceClassifier(nn.Module):
@@ -390,16 +414,19 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.readout_mode = readout_mode
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
         self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        self.attention = nn.Linear(hidden_size * direction_factor, 1) if self.readout_mode == "attention" else None
 
     def _build_gru(self, input_size, device):
         self.gru = nn.GRU(
@@ -421,7 +448,8 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        pooled = _pool_sequence_hidden_states(out, self.readout_mode, self.attention)
+        return self.classifier(pooled).squeeze(-1)
 
 
 class GRUSequenceRegressor(nn.Module):

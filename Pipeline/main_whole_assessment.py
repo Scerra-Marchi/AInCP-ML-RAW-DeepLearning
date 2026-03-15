@@ -21,18 +21,12 @@ DATA_FOLDER = "../Dataset/"
 
 WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
 DECIMATION_FACTOR = 3
-MODEL_NAMES = ["Transformer"]
+MODEL_NAMES = ["LSTM", "GRU", "RNN", "Transformer", "CNN1D", "Reservoir"]
 METHODS = [
     "raw",
-    "raw_enmo_ai_ratio_jerk",
-    "raw_enmo",
-    "raw_ai",
-    "raw_ratio",
-    "raw_jerk",
+    "raw_enmo_ai_jerk",
     "enmo_ai",
-    "enmo_jerk",
-    "enmo_asymmetry",
-    "enmo_asymmetry_jerk",
+    "enmo_ai_jerk",
 ]
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
