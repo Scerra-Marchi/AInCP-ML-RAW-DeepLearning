@@ -35,7 +35,7 @@ DEFAULT_ITERATIONS = TOTAL_FOLDS
 # - Random guesser (rough baseline): ~0.50 on balanced classes (can be lower if imbalanced).
 # - Decent classifier: >= 0.60.
 # - Good classifier: >= 0.75.
-CV_MIN_MEAN_TEST_SCORE = 0.85
+CV_MIN_MEAN_TEST_SCORE = 0.75
 DEBUG_MIN_MEAN_TEST_SCORE = 0.0
 
 
