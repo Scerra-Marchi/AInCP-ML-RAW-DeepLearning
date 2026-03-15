@@ -82,6 +82,160 @@ def _timeline_bar_width(timeline_timestamps):
     return float(0.8 * np.median(diffs))
 
 
+def _subject_shap_time_of_day_data(
+    *,
+    timeline_timestamps,
+    signed_time_contribution,
+    invalid_mask,
+):
+    timeline_timestamps = np.asarray(timeline_timestamps, dtype=float)
+    signed_time_contribution = np.asarray(signed_time_contribution, dtype=float)
+    invalid_mask = np.asarray(invalid_mask, dtype=bool)
+
+    valid_mask = ~invalid_mask
+    if not np.any(valid_mask):
+        return None
+
+    valid_timestamps = timeline_timestamps[valid_mask]
+    valid_signed = signed_time_contribution[valid_mask]
+    valid_abs = np.abs(valid_signed)
+
+    day_numbers = np.floor(valid_timestamps)
+    unique_days = np.sort(np.unique(day_numbers))
+    rounded_slot_values = np.round(np.mod(valid_timestamps, 1.0), 8)
+    unique_slots = np.sort(np.unique(rounded_slot_values))
+    slots_per_day = unique_slots.size
+    predictions_per_day = valid_timestamps.size / max(unique_days.size, 1)
+    if slots_per_day < 2 or predictions_per_day < 1.0:
+        return None
+
+    signed_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
+    abs_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
+    counts = np.zeros((unique_days.size, slots_per_day), dtype=float)
+
+    day_idx = np.searchsorted(unique_days, day_numbers)
+    slot_idx = np.searchsorted(unique_slots, rounded_slot_values)
+    np.add.at(signed_sum, (day_idx, slot_idx), valid_signed)
+    np.add.at(abs_sum, (day_idx, slot_idx), valid_abs)
+    np.add.at(counts, (day_idx, slot_idx), 1.0)
+
+    signed_matrix = np.divide(
+        signed_sum,
+        counts,
+        out=np.full_like(signed_sum, np.nan),
+        where=counts > 0,
+    )
+    abs_matrix = np.divide(
+        abs_sum,
+        counts,
+        out=np.full_like(abs_sum, np.nan),
+        where=counts > 0,
+    )
+    mean_signed = np.nanmean(signed_matrix, axis=0)
+    mean_abs = np.nanmean(abs_matrix, axis=0)
+    day_labels = [
+        matplotlib.dates.num2date(float(day_value)).strftime("%a")
+        for day_value in unique_days
+    ]
+
+    return {
+        "day_labels": day_labels,
+        "slot_values": unique_slots,
+        "signed_matrix": signed_matrix,
+        "mean_signed": mean_signed,
+        "mean_abs": mean_abs,
+    }
+
+
+def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_data):
+    if subject_cycle_data is None:
+        return
+
+    signed_matrix = subject_cycle_data["signed_matrix"]
+    mean_signed = subject_cycle_data["mean_signed"]
+    mean_abs = subject_cycle_data["mean_abs"]
+    slot_values = subject_cycle_data["slot_values"]
+    day_labels = subject_cycle_data["day_labels"]
+
+    signed_limit = np.nanmax(np.abs(signed_matrix))
+    if not np.isfinite(signed_limit) or signed_limit == 0.0:
+        signed_limit = np.nanmax(np.abs(mean_signed))
+    if not np.isfinite(signed_limit) or signed_limit == 0.0:
+        signed_limit = 1.0
+
+    abs_limit = np.nanmax(mean_abs)
+    if not np.isfinite(abs_limit) or abs_limit == 0.0:
+        abs_limit = 1.0
+
+    fig_height = max(4.8, 2.4 + 0.35 * signed_matrix.shape[0])
+    fig, axes = plt.subplots(
+        3,
+        1,
+        figsize=(12, fig_height),
+        sharex=True,
+        gridspec_kw={"height_ratios": [max(1.2, 0.45 * signed_matrix.shape[0]), 1.0, 1.0]},
+    )
+
+    im_days = axes[0].imshow(
+        signed_matrix,
+        aspect="auto",
+        cmap="coolwarm",
+        vmin=-signed_limit,
+        vmax=signed_limit,
+    )
+    axes[0].set_yticks(np.arange(len(day_labels)))
+    axes[0].set_yticklabels(day_labels)
+    axes[0].set_title(f"Subject {subject} - SHAP impact over the daily cycle")
+    axes[0].set_ylabel("Day")
+    plt.colorbar(im_days, ax=axes[0], fraction=0.03, pad=0.02, label="Signed contribution")
+
+    im_mean_signed = axes[1].imshow(
+        mean_signed.reshape(1, -1),
+        aspect="auto",
+        cmap="coolwarm",
+        vmin=-signed_limit,
+        vmax=signed_limit,
+    )
+    axes[1].set_yticks([0])
+    axes[1].set_yticklabels(["Mean signed"])
+    plt.colorbar(im_mean_signed, ax=axes[1], fraction=0.03, pad=0.02, label="Contribution")
+
+    im_mean_abs = axes[2].imshow(
+        mean_abs.reshape(1, -1),
+        aspect="auto",
+        cmap="magma",
+        vmin=0.0,
+        vmax=abs_limit,
+    )
+    axes[2].set_yticks([0])
+    axes[2].set_yticklabels(["Mean |SHAP|"])
+    axes[2].set_xlabel("Time of day")
+    plt.colorbar(im_mean_abs, ax=axes[2], fraction=0.03, pad=0.02, label="Magnitude")
+
+    slot_hours = slot_values * 24.0
+    requested_tick_hours = np.arange(0, 24, 2)
+    tick_positions = []
+    tick_labels = []
+    for hour in requested_tick_hours:
+        position = int(np.argmin(np.abs(slot_hours - hour)))
+        if position not in tick_positions:
+            tick_positions.append(position)
+            tick_labels.append(f"{hour:02d}:00")
+    axes[2].set_xticks(tick_positions)
+    axes[2].set_xticklabels(tick_labels)
+    for ax in axes[:2]:
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels)
+
+    plt.tight_layout()
+    plt.savefig(
+        stats_folder + f"subject_{subject}_shap_time_of_day_heatmap.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
 def _regressor_timeline_context(
     *,
     prep,
@@ -480,6 +634,16 @@ def plot_dashboards(
         plt.tight_layout()
         plt.savefig(stats_folder + '/subject_' +str(subject)+'_Home-AHA.png', dpi = 500)
         plt.close()
+
+        _plot_subject_shap_time_of_day_heatmap(
+            stats_folder,
+            subject,
+            _subject_shap_time_of_day_data(
+                timeline_timestamps=regressor_timestamps,
+                signed_time_contribution=signed_time_contribution,
+                invalid_mask=regressor_invalid_mask,
+            ),
+        )
 
     metadata_out = metadata.copy()
     metadata_out['healthy_percentage'] = healthy_percentage
