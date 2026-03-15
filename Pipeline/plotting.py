@@ -70,6 +70,18 @@ def _build_regressor_shap_explainer(
         _restore_regressor_output_flags(net, previous_return_last_step, previous_keep_output_dim)
 
 
+def _timeline_bar_width(timeline_timestamps):
+    timeline_timestamps = np.asarray(timeline_timestamps, dtype=float)
+    if timeline_timestamps.size < 2:
+        return 1.0 / 24.0
+
+    diffs = np.diff(np.sort(timeline_timestamps))
+    diffs = diffs[diffs > 0]
+    if diffs.size == 0:
+        return 1.0 / 24.0
+    return float(0.8 * np.median(diffs))
+
+
 def _regressor_timeline_context(
     *,
     prep,
@@ -266,11 +278,19 @@ def plot_dashboards(
 
         abs_attr = np.abs(attr)
         time_importance = np.mean(abs_attr, axis=1)
+        signed_time_contribution = np.sum(attr, axis=1)
 
         feature_names = build_block_feature_names(
             n_features=regressor_sequence.shape[1],
             n_estimators=len(predictions),
         )
+
+        if regressor_timestamps.shape[0] != signed_time_contribution.shape[0]:
+            aligned_len = min(regressor_timestamps.shape[0], signed_time_contribution.shape[0])
+            regressor_timestamps = regressor_timestamps[:aligned_len]
+            regressor_invalid_mask = regressor_invalid_mask[:aligned_len]
+            time_importance = time_importance[:aligned_len]
+            signed_time_contribution = signed_time_contribution[:aligned_len]
 
         plt.figure(figsize=(10,4))
         plt.imshow(abs_attr.T, aspect="auto", cmap="inferno", vmin=0.0, vmax=np.percentile(abs_attr, 99))
@@ -328,6 +348,34 @@ def plot_dashboards(
         plt.title(f"Subject {subject} - SHAP time importance")
         plt.tight_layout()
         plt.savefig(stats_folder + f"subject_{subject}_explain_time.png", dpi=300)
+        plt.close()
+
+        bar_width = _timeline_bar_width(regressor_timestamps)
+        bar_colors = [
+            matplotlib.colors.to_rgba(
+                "tab:red" if contribution >= 0 else "tab:blue",
+                alpha=0.35 if is_invalid else 0.8,
+            )
+            for contribution, is_invalid in zip(signed_time_contribution, regressor_invalid_mask)
+        ]
+
+        fig, ax_contrib = plt.subplots(figsize=(11, 3.4))
+        ax_contrib.grid(axis="y", alpha=0.3)
+        ax_contrib.bar(
+            regressor_timestamps,
+            signed_time_contribution,
+            width=bar_width,
+            color=bar_colors,
+            edgecolor="none",
+        )
+        ax_contrib.axhline(y=0.0, color="black", linewidth=0.8)
+        ax_contrib.set_ylabel("Sum SHAP")
+        ax_contrib.set_xlabel("Orario")
+        ax_contrib.set_title(f"Subject {subject} - SHAP directional time contributions")
+        ax_contrib.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
+        fig.autofmt_xdate()
+        plt.tight_layout()
+        plt.savefig(stats_folder + f"subject_{subject}_shap_time_direction.png", dpi=300, bbox_inches="tight")
         plt.close()
 
         #########################################################
