@@ -142,4 +142,3 @@ dependencies:
       - xgboost==3.2.0
       - yarl==1.22.0
       - zipp==3.23.0
-prefix: /home/scerramarchi/miniconda3/envs/AInCP-ML

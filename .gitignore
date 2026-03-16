@@ -11,12 +11,6 @@ __pycache__/
 # ignore the virtual environment
 **/venv/
 
-# ignore the Best_model folder
-**/Best_model/
-
-# ignore the Results folder
-**/Results/
-
 # ignore debug iterations outputs (including summary files)
 Pipeline/Iterations_debug/
 
