@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import warnings
 import pandas as pd
 from itertools import product
@@ -17,6 +18,96 @@ from read_file import read_file
 
 import torch
 import shap
+
+THESIS_PDF_DPI = 300
+THESIS_PLOT_SIZES = {
+    "timeline": (6.4, 2.8),
+    "summary": (6.4, 4.2),
+    "heatmap": (6.6, 4.0),
+    "wide": (6.8, 3.4),
+    "corrcoeff": (9.0, 3.4),
+}
+_PLOT_STYLE_CONFIGURED = False
+
+
+def _configure_plot_style():
+    global _PLOT_STYLE_CONFIGURED
+    if _PLOT_STYLE_CONFIGURED:
+        return
+
+    latex_available = shutil.which("latex") is not None
+    base_params = {
+        "font.size": 10,
+        "axes.titlesize": 11,
+        "axes.labelsize": 10,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        "legend.fontsize": 8,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.4,
+        "axes.unicode_minus": False,
+    }
+    matplotlib.rcParams.update(base_params)
+
+    if latex_available:
+        matplotlib.rcParams.update(
+            {
+                "text.usetex": True,
+                "font.family": "serif",
+                "font.serif": ["Times"],
+                "text.latex.preamble": r"\usepackage{mathptmx}",
+            }
+        )
+    else:
+        matplotlib.rcParams.update(
+            {
+                "text.usetex": False,
+                "font.family": "serif",
+                "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "DejaVu Serif"],
+            }
+        )
+
+    _PLOT_STYLE_CONFIGURED = True
+
+
+def _figure_size(kind):
+    return THESIS_PLOT_SIZES[kind]
+
+
+def _new_figure(kind, *, nrows=1, ncols=1, sharex=False, gridspec_kw=None):
+    return plt.subplots(
+        nrows,
+        ncols,
+        figsize=_figure_size(kind),
+        sharex=sharex,
+        gridspec_kw=gridspec_kw,
+        constrained_layout=True,
+    )
+
+
+def _format_time_axis(ax):
+    locator = matplotlib.dates.AutoDateLocator(minticks=4, maxticks=8)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(matplotlib.dates.ConciseDateFormatter(locator))
+
+
+def _apply_axis_style(ax, *, grid_axis="y"):
+    if grid_axis:
+        ax.grid(axis=grid_axis, alpha=0.25)
+
+
+def _save_figure(fig, path_base):
+    save_kwargs = {"bbox_inches": "tight", "pad_inches": 0.03}
+    fig.savefig(path_base + ".pdf", dpi=THESIS_PDF_DPI, **save_kwargs)
+    plt.close(fig)
+
+
+def _percent_label(text):
+    if matplotlib.rcParams.get("text.usetex", False):
+        return text.replace("%", r"\%")
+    return text
 
 
 def _transform_regressor_input_for_shap(regressor, model_input):
@@ -167,13 +258,14 @@ def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_
     if not np.isfinite(abs_limit) or abs_limit == 0.0:
         abs_limit = 1.0
 
-    fig_height = max(4.8, 2.4 + 0.35 * signed_matrix.shape[0])
+    fig_height = max(4.8, 2.6 + 0.35 * signed_matrix.shape[0])
     fig, axes = plt.subplots(
         3,
         1,
-        figsize=(12, fig_height),
+        figsize=(6.8, fig_height),
         sharex=True,
         gridspec_kw={"height_ratios": [max(1.2, 0.45 * signed_matrix.shape[0]), 1.0, 1.0]},
+        constrained_layout=True,
     )
 
     im_days = axes[0].imshow(
@@ -227,13 +319,7 @@ def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_
         ax.set_xticks(tick_positions)
         ax.set_xticklabels(tick_labels)
 
-    plt.tight_layout()
-    plt.savefig(
-        stats_folder + f"subject_{subject}_shap_time_of_day_heatmap.png",
-        dpi=300,
-        bbox_inches="tight",
-    )
-    plt.close()
+    _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_time_of_day_heatmap"))
 
 
 def _regressor_timeline_context(
@@ -280,6 +366,7 @@ def plot_dashboards(
     window_size=None,
     decimation_factor=1,
 ):
+    _configure_plot_style()
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     timestamps_file = f"timestamps_list_decim_{int(decimation_factor)}.joblib"
@@ -287,7 +374,7 @@ def plot_dashboards(
         timestamps = create_timestamps_list(data_folder, decimation_factor)
         jl.dump(timestamps, timestamps_file)
 
-    stats_folder = save_folder + 'Week_stats/'
+    stats_folder = os.path.join(save_folder, "Week_stats")
     os.makedirs(stats_folder, exist_ok=True)
 
     best_estimators_df = pd.read_csv(save_folder+'best_estimators_results.csv', index_col=0)\
@@ -446,17 +533,18 @@ def plot_dashboards(
             time_importance = time_importance[:aligned_len]
             signed_time_contribution = signed_time_contribution[:aligned_len]
 
-        plt.figure(figsize=(10,4))
-        plt.imshow(abs_attr.T, aspect="auto", cmap="inferno", vmin=0.0, vmax=np.percentile(abs_attr, 99))
-        plt.colorbar(label="|SHAP value|")
-        plt.xlabel("Time window")
-        plt.ylabel("Feature")
-        plt.title(f"Subject {subject} - SHAP heatmap")
-        plt.tight_layout()
-        plt.savefig(stats_folder + f"subject_{subject}_explain_heatmap.png", dpi=300)
-        plt.close()
+        fig, ax = _new_figure("heatmap")
+        vmax = np.nanpercentile(abs_attr, 99)
+        if not np.isfinite(vmax) or vmax <= 0.0:
+            vmax = 1.0
+        im = ax.imshow(abs_attr.T, aspect="auto", cmap="inferno", vmin=0.0, vmax=vmax)
+        fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="|SHAP value|")
+        ax.set_xlabel("Time window")
+        ax.set_ylabel("Feature")
+        ax.set_title(f"Subject {subject} - SHAP heatmap")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_explain_heatmap"))
 
-        plt.figure(figsize=(8, 5))
+        plt.figure(figsize=_figure_size("summary"))
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -470,12 +558,12 @@ def plot_dashboards(
                 show=False,
                 plot_size=None,
             )
+        fig = plt.gcf()
+        fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP summary")
-        plt.tight_layout()
-        plt.savefig(stats_folder + f"subject_{subject}_shap_summary.png", dpi=300)
-        plt.close()
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_summary"))
 
-        plt.figure(figsize=(8, 5))
+        plt.figure(figsize=_figure_size("summary"))
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -490,19 +578,18 @@ def plot_dashboards(
                 show=False,
                 plot_size=None,
             )
+        fig = plt.gcf()
+        fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP bar summary")
-        plt.tight_layout()
-        plt.savefig(stats_folder + f"subject_{subject}_shap_summary_bar.png", dpi=300)
-        plt.close()
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_summary_bar"))
 
-        plt.figure(figsize=(8,3))
-        plt.plot(time_importance)
-        plt.xlabel("Time window")
-        plt.ylabel("Mean |SHAP value|")
-        plt.title(f"Subject {subject} - SHAP time importance")
-        plt.tight_layout()
-        plt.savefig(stats_folder + f"subject_{subject}_explain_time.png", dpi=300)
-        plt.close()
+        fig, ax = _new_figure("timeline")
+        ax.plot(time_importance, color="tab:orange")
+        ax.set_xlabel("Time window")
+        ax.set_ylabel("Mean |SHAP value|")
+        ax.set_title(f"Subject {subject} - SHAP time importance")
+        _apply_axis_style(ax, grid_axis="y")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_explain_time"))
 
         bar_width = _timeline_bar_width(regressor_timestamps)
         bar_colors = [
@@ -513,8 +600,8 @@ def plot_dashboards(
             for contribution, is_invalid in zip(signed_time_contribution, regressor_invalid_mask)
         ]
 
-        fig, ax_contrib = plt.subplots(figsize=(11, 3.4))
-        ax_contrib.grid(axis="y", alpha=0.3)
+        fig, ax_contrib = _new_figure("wide")
+        _apply_axis_style(ax_contrib, grid_axis="y")
         ax_contrib.bar(
             regressor_timestamps,
             signed_time_contribution,
@@ -524,50 +611,52 @@ def plot_dashboards(
         )
         ax_contrib.axhline(y=0.0, color="black", linewidth=0.8)
         ax_contrib.set_ylabel("Sum SHAP")
-        ax_contrib.set_xlabel("Orario")
+        ax_contrib.set_xlabel("Time")
         ax_contrib.set_title(f"Subject {subject} - SHAP directional time contributions")
-        ax_contrib.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        fig.autofmt_xdate()
-        plt.tight_layout()
-        plt.savefig(stats_folder + f"subject_{subject}_shap_time_direction.png", dpi=300, bbox_inches="tight")
-        plt.close()
+        _format_time_axis(ax_contrib)
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_time_direction"))
 
         #########################################################
 
         #################### ANDAMENTO WEEK GENERALE ####################
-        plt.grid()
-        ax = plt.gca()
-        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.plot(timestamps, mag_D)
-        plt.plot(timestamps, mag_ND)
-        plt.xlabel("Orario")
-        plt.ylabel("Magnitudo")
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + 'subject_' +str(subject)+'_mag.png', dpi = 500)
-        plt.close()
+        fig, ax = _new_figure("timeline")
+        ax.plot(timestamps, mag_D, label="Dominant")
+        ax.plot(timestamps, mag_ND, label="Non-dominant")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Magnitude")
+        ax.set_title(f"Subject {subject} - Week magnitude")
+        _format_time_axis(ax)
+        _apply_axis_style(ax, grid_axis="y")
+        ax.legend(loc="upper right")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_mag"))
 
         #################### GRAFICO DEI PUNTI ####################
-        ax = plt.gca()
+        fig, ax = _new_figure("timeline")
         ax.set_ylim([0,1])
         for pred in predictions:
-            plt.scatter(list(range(len(pred))), pred, c=pred, cmap='viridis', norm=plt.Normalize(0, 1), s=1)
-
-        plt.xlabel("Sample")
-        plt.ylabel("Classificazione")
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_samples.png', dpi = 500)
-        plt.close()
+            ax.scatter(
+                np.arange(len(pred)),
+                pred,
+                c=pred,
+                cmap="viridis",
+                norm=plt.Normalize(0, 1),
+                s=2,
+                linewidths=0,
+            )
+        ax.set_xlabel("Sample")
+        ax.set_ylabel("Classifier output")
+        ax.set_title(f"Subject {subject} - Window predictions")
+        _apply_axis_style(ax, grid_axis="y")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_samples"))
 
         #################### CPI TIMELINE ####################
         valid_per_window = (~invalid_mask).astype(float)
         cumulative_valid_count = np.cumsum(valid_per_window)
 
-        plt.grid()
-        ax = plt.gca()
+        fig, ax = _new_figure("timeline")
         ax.set_ylim([0,1])
-        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
+        _format_time_axis(ax)
+        _apply_axis_style(ax, grid_axis="y")
         for i, pred in enumerate(predictions):
             pred = np.asarray(pred, dtype=float)
             cumulative_valid_sum = np.cumsum(np.where(~invalid_mask, pred, 0.0))
@@ -577,30 +666,26 @@ def plot_dashboards(
                 out=np.full(cumulative_valid_sum.shape, np.nan, dtype=float),
                 where=cumulative_valid_count > 0,
             )
-            plt.plot(window_timestamps, cpi_timeline, label=f"classifier_{i}")
+            ax.plot(window_timestamps, cpi_timeline, label=f"classifier_{i}")
         if len(predictions) > 1:
-            plt.legend()
-        plt.xlabel("Orario")
-        plt.ylabel("CPI")
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_CPI_timeline.png', dpi = 500)
-        plt.close()
+            ax.legend(loc="best")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("CPI")
+        ax.set_title(f"Subject {subject} - CPI timeline")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_CPI_timeline"))
 
         ##################### SIGNIFICATIVITY TIMELINE ######################
         significance_timeline = (100.0 * cumulative_valid_count) / np.arange(1, len(invalid_mask) + 1, dtype=float)
 
-        plt.grid()
-        ax = plt.gca()
+        fig, ax = _new_figure("timeline")
         ax.set_ylim([0,100])
-        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.plot(window_timestamps, significance_timeline)
-        plt.xlabel("Orario")
-        plt.ylabel("Significatività")
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_validity_timeline.png', dpi = 500)
-        plt.close()
+        _format_time_axis(ax)
+        _apply_axis_style(ax, grid_axis="y")
+        ax.plot(window_timestamps, significance_timeline, color="tab:purple")
+        ax.set_xlabel("Time")
+        ax.set_ylabel(_percent_label("Validity (%)"))
+        ax.set_title(f"Subject {subject} - Validity timeline")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_validity_timeline"))
 
         ##################### PREDICTED AHA PLOT ####################
         prev_return_last_step = getattr(net, "return_last_step", None)
@@ -621,19 +706,17 @@ def plot_dashboards(
         aha_timeline_valid_only = aha_timeline.copy()
         aha_timeline_valid_only[regressor_invalid_mask] = np.nan
 
-        plt.grid()
-        ax = plt.gca()
+        fig, ax = _new_figure("timeline")
         ax.set_ylim([-1,101])
-        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-        plt.axhline(y = real_aha, color = 'b', linestyle = '--', linewidth= 1, label='AHA')
-        plt.xlabel("Orario")
-        plt.ylabel("Home-AHA")
-        plt.plot(regressor_timestamps, aha_timeline_valid_only, c='green')
-        plt.legend()
-        plt.gcf().set_size_inches(8, 2)
-        plt.tight_layout()
-        plt.savefig(stats_folder + '/subject_' +str(subject)+'_Home-AHA.png', dpi = 500)
-        plt.close()
+        _format_time_axis(ax)
+        _apply_axis_style(ax, grid_axis="y")
+        ax.axhline(y=real_aha, color="tab:blue", linestyle="--", linewidth=1.0, label="AHA")
+        ax.plot(regressor_timestamps, aha_timeline_valid_only, color="tab:green", label="Predicted AHA")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("DAB")
+        ax.set_title(f"Subject {subject} - Predicted AHA")
+        ax.legend(loc="best")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_DAB"))
 
         _plot_subject_shap_time_of_day_heatmap(
             stats_folder,
@@ -648,10 +731,11 @@ def plot_dashboards(
     metadata_out = metadata.copy()
     metadata_out['healthy_percentage'] = healthy_percentage
     metadata_out['predicted_aha'] = predicted_aha_list
-    metadata_out.to_csv(stats_folder + '/predictions_dataframe.csv', index=False)
+    metadata_out.to_csv(os.path.join(stats_folder, "predictions_dataframe.csv"), index=False)
 
 
 def plot_corrcoeff(iterations_folders:list, save_folder:str):
+    _configure_plot_style()
     predictions_dataframe = pd.DataFrame()
     counter = 0
     for folder in iterations_folders:
@@ -663,7 +747,7 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
     CPI_list_list = predictions_dataframe['healthy_percentage'].apply(json.loads).tolist()
 
     cdict = {0:'green', 1: 'gold', 2: 'orange', 3: 'red'}
-    _, axs = plt.subplots(1, 3, figsize=(15, 5)) 
+    fig, axs = plt.subplots(1, 3, figsize=_figure_size("corrcoeff"), constrained_layout=True)
 
     scatter_x = np.array([])
     scatter_y = np.array([])
@@ -677,7 +761,7 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
             scatter_marker = np.append(scatter_marker, iteration)
             group = np.append(group, macs)
 
-    axs[0].grid()
+    _apply_axis_style(axs[0], grid_axis="both")
     plotted_labels = set()
     for g, m in product(np.unique(group), np.unique(scatter_marker)):
         label = 'MACS ' + str(int(g)) if g not in plotted_labels else None
@@ -695,7 +779,7 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
     scatter_marker = np.array(predictions_dataframe['iteration'].values)
     group = np.array(predictions_dataframe['MACS'].values)
 
-    axs[1].grid()
+    _apply_axis_style(axs[1], grid_axis="both")
     plotted_labels = set()
     for g, m in product(np.unique(group), np.unique(scatter_marker)):
         label = 'MACS ' + str(g) if g not in plotted_labels else None
@@ -710,7 +794,7 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
 
     scatter_x = np.array(predictions_dataframe['predicted_aha'].values)
 
-    axs[2].grid()
+    _apply_axis_style(axs[2], grid_axis="both")
     plotted_labels = set()
     for g in np.unique(group):
         label = 'MACS ' + str(g) if g not in plotted_labels else None
@@ -718,8 +802,7 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
         plotted_labels.add(g)
 
     axs[2].legend()
-    axs[2].set_xlabel('Home-AHA')
+    axs[2].set_xlabel('DAB')
     axs[2].set_ylabel('AHA')
 
-    plt.savefig(save_folder+'Scatter_AHA_CPI_Home-AHA.png', dpi=500)
-    plt.close()
+    _save_figure(fig, os.path.join(save_folder, "Scatter_AHA_CPI_DAB"))
