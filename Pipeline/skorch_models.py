@@ -157,6 +157,22 @@ class SequenceStandardScaler(BaseEstimator, TransformerMixin):
         return X_scaled
 
 
+def _pool_sequence_hidden_states(out, readout_mode: str, attention: nn.Module | None = None):
+    if readout_mode == "last":
+        return out[:, -1]
+    if readout_mode == "mean":
+        return out.mean(dim=1)
+    if readout_mode == "max":
+        return out.max(dim=1).values
+    if readout_mode == "attention":
+        if attention is None:
+            raise ValueError("attention module is required when readout_mode='attention'.")
+        scores = attention(out).squeeze(-1)
+        weights = torch.softmax(scores, dim=1)
+        return torch.bmm(weights.unsqueeze(1), out).squeeze(1)
+    raise ValueError(f"Unsupported readout_mode: {readout_mode}")
+
+
 def make_regressor_net(module, module_kwargs=None, device=None):
     module_kwargs = {} if module_kwargs is None else dict(module_kwargs)
     if device is None:
@@ -270,16 +286,19 @@ class LSTMSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.readout_mode = readout_mode
 
         self.lstm = None
         direction_factor = 2 if bidirectional else 1
         self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        self.attention = nn.Linear(hidden_size * direction_factor, 1) if self.readout_mode == "attention" else None
 
     def _build_lstm(self, input_size, device):
         self.lstm = nn.LSTM(
@@ -301,7 +320,8 @@ class LSTMSequenceClassifier(nn.Module):
 
         self.lstm.flatten_parameters()
         out, _ = self.lstm(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        pooled = _pool_sequence_hidden_states(out, self.readout_mode, self.attention)
+        return self.classifier(pooled).squeeze(-1)
 
 
 class RNNSequenceClassifier(nn.Module):
@@ -313,6 +333,7 @@ class RNNSequenceClassifier(nn.Module):
         dropout: float = 0.0,
         bidirectional: bool = False,
         nonlinearity: str = "tanh",
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -320,10 +341,12 @@ class RNNSequenceClassifier(nn.Module):
         self.dropout = dropout
         self.bidirectional = bidirectional
         self.nonlinearity = nonlinearity
+        self.readout_mode = readout_mode
 
         self.rnn = None
         direction_factor = 2 if bidirectional else 1
         self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        self.attention = nn.Linear(hidden_size * direction_factor, 1) if self.readout_mode == "attention" else None
 
     def _build_rnn(self, input_size, device):
         self.rnn = nn.RNN(
@@ -346,7 +369,8 @@ class RNNSequenceClassifier(nn.Module):
 
         self.rnn.flatten_parameters()
         out, _ = self.rnn(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        pooled = _pool_sequence_hidden_states(out, self.readout_mode, self.attention)
+        return self.classifier(pooled).squeeze(-1)
 
 
 class MLPSequenceClassifier(nn.Module):
@@ -390,16 +414,19 @@ class GRUSequenceClassifier(nn.Module):
         num_layers: int = 1,
         dropout: float = 0.0,
         bidirectional: bool = False,
+        readout_mode: str = "last",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
         self.bidirectional = bidirectional
+        self.readout_mode = readout_mode
 
         self.gru = None
         direction_factor = 2 if bidirectional else 1
         self.classifier = nn.Linear(hidden_size * direction_factor, 1)
+        self.attention = nn.Linear(hidden_size * direction_factor, 1) if self.readout_mode == "attention" else None
 
     def _build_gru(self, input_size, device):
         self.gru = nn.GRU(
@@ -421,7 +448,8 @@ class GRUSequenceClassifier(nn.Module):
 
         self.gru.flatten_parameters()
         out, _ = self.gru(x)
-        return self.classifier(out[:, -1]).squeeze(-1)
+        pooled = _pool_sequence_hidden_states(out, self.readout_mode, self.attention)
+        return self.classifier(pooled).squeeze(-1)
 
 
 class GRUSequenceRegressor(nn.Module):
@@ -434,6 +462,7 @@ class GRUSequenceRegressor(nn.Module):
         dropout: float = 0.0,
         return_last_step: bool = False,
         readout_mode: str = "last",
+        keep_output_dim: bool = False,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -441,6 +470,7 @@ class GRUSequenceRegressor(nn.Module):
         self.dropout = dropout
         self.return_last_step = return_last_step
         self.readout_mode = readout_mode
+        self.keep_output_dim = keep_output_dim
 
         self.input_size = input_size
         self.gru = None
@@ -461,10 +491,14 @@ class GRUSequenceRegressor(nn.Module):
         ).to(device)
         self.skip = nn.Linear(input_size, 2).to(device)
 
-    def _decode_soft_aha(self, raw_outputs):
+    def _decode_soft_aha_from_severity(self, raw_outputs):
         healthy_probability = torch.sigmoid(raw_outputs[..., 0])
-        affected_aha = torch.sigmoid(raw_outputs[..., 1]) * AHA_TARGET_SCALE
-        return healthy_probability * AHA_TARGET_SCALE + (1.0 - healthy_probability) * affected_aha
+        affected_severity = torch.sigmoid(raw_outputs[..., 1]) * AHA_TARGET_SCALE
+        severity = (1.0 - healthy_probability) * affected_severity
+        aha = AHA_TARGET_SCALE - severity
+        if self.keep_output_dim:
+            return aha.unsqueeze(-1)
+        return aha
 
     def _pool_hidden_states(self, out, skip_out):
         if self.readout_mode == "last":
@@ -483,17 +517,17 @@ class GRUSequenceRegressor(nn.Module):
             return pooled_out, pooled_skip
         raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
 
-    def _sequence_predictions(self, out, skip_out):
+    def _causal_pooled_hidden_states(self, out, skip_out):
+        # Prefix-causal pooling: prediction at time t uses only steps <= t.
         if self.readout_mode == "last":
-            return self._decode_soft_aha(self.regressor(out) + skip_out)
+            return out, skip_out
         if self.readout_mode == "mean":
-            pooled_out = out.cumsum(dim=1) / torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
-            pooled_skip = skip_out.cumsum(dim=1) / torch.arange(1, skip_out.shape[1] + 1, device=skip_out.device, dtype=skip_out.dtype).view(1, -1, 1)
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            denom = torch.arange(1, out.shape[1] + 1, device=out.device, dtype=out.dtype).view(1, -1, 1)
+            pooled_out = out.cumsum(dim=1) / denom
+            pooled_skip = skip_out.cumsum(dim=1) / denom
+            return pooled_out, pooled_skip
         if self.readout_mode == "max":
-            pooled_out = out.cummax(dim=1).values
-            pooled_skip = skip_out.cummax(dim=1).values
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            return out.cummax(dim=1).values, skip_out.cummax(dim=1).values
         if self.readout_mode == "attention":
             scores = self.attention(out).squeeze(-1)
             t_steps = out.shape[1]
@@ -503,8 +537,12 @@ class GRUSequenceRegressor(nn.Module):
             weights = torch.softmax(score_matrix, dim=-1)
             pooled_out = torch.bmm(weights, out)
             pooled_skip = torch.bmm(weights, skip_out)
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            return pooled_out, pooled_skip
         raise ValueError(f"Unsupported readout_mode: {self.readout_mode}")
+
+    def _sequence_predictions(self, out, skip_out):
+        pooled_out, pooled_skip = self._causal_pooled_hidden_states(out, skip_out)
+        return self._decode_soft_aha_from_severity(self.regressor(pooled_out) + pooled_skip)
 
     def forward(self, x):
         x = x.float()
@@ -519,7 +557,7 @@ class GRUSequenceRegressor(nn.Module):
         skip_out = self.skip(x)
         if self.return_last_step:
             pooled_out, pooled_skip = self._pool_hidden_states(out, skip_out)
-            return self._decode_soft_aha(self.regressor(pooled_out) + pooled_skip)
+            return self._decode_soft_aha_from_severity(self.regressor(pooled_out) + pooled_skip)
         return self._sequence_predictions(out, skip_out)
 
 

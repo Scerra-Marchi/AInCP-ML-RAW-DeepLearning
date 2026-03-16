@@ -67,49 +67,31 @@ def train_select_classifiers(
     # 3) train missing combinations (trials early-exit when artifacts already exist),
     # 4) load and aggregate cv_results.csv across the selected grid.
 
+    recurrent_param_grid = {
+        "model__optimizer__weight_decay": [1e-4],
+        "model__lr": [1e-3, 3e-4],
+        "model__max_epochs": [500],
+        "model__batch_size": [128],
+        "model__callbacks__early_stopping__patience": [10],
+        "model__module__hidden_size": [64, 128],
+        "model__module__num_layers": [1, 2],
+        "model__module__dropout": [0.1],
+        "model__module__bidirectional": [True],
+        "model__module__readout_mode": ["attention", "mean"],
+    }
+
     gridsearch_specs_list = [
         {
             "name": "LSTM",
-            "param_grid": {
-                "model__optimizer__weight_decay": [1e-4],
-                "model__lr": [1e-2, 1e-3],
-                "model__max_epochs": [500],
-                "model__batch_size": [128],
-                "model__callbacks__early_stopping__patience": [10],
-                "model__module__hidden_size": [128],
-                "model__module__num_layers": [1],
-                "model__module__dropout": [0.1],
-                "model__module__bidirectional": [True],
-            },
+            "param_grid": dict(recurrent_param_grid),
         },
         {
             "name": "GRU",
-            "param_grid": {
-                "model__optimizer__weight_decay": [1e-4],
-                "model__lr": [3e-4, 1e-3],
-                "model__max_epochs": [500],
-                "model__batch_size": [128],
-                "model__callbacks__early_stopping__patience": [10],
-                "model__module__hidden_size": [32, 64, 96],
-                "model__module__num_layers": [1, 2],
-                "model__module__dropout": [0.0, 0.2],
-                "model__module__bidirectional": [False, True],
-            },
+            "param_grid": dict(recurrent_param_grid),
         },
         {
             "name": "RNN",
-            "param_grid": {
-                "model__optimizer__weight_decay": [1e-4],
-                "model__lr": [3e-4, 1e-3],
-                "model__max_epochs": [500],
-                "model__batch_size": [128],
-                "model__callbacks__early_stopping__patience": [10],
-                "model__module__hidden_size": [32, 64, 96],
-                "model__module__num_layers": [1, 2],
-                "model__module__dropout": [0.0, 0.2],
-                "model__module__bidirectional": [False],
-                "model__module__nonlinearity": ["tanh", "relu"],
-            },
+            "param_grid": dict(recurrent_param_grid),
         },
         {
             "name": "NeuralNet",
@@ -157,29 +139,29 @@ def train_select_classifiers(
         {
             "name": "CNN1D",
             "param_grid": {
-                "model__optimizer__weight_decay": [1e-5, 1e-4],
-                "model__lr": [3e-4, 6e-4],
+                "model__optimizer__weight_decay": [1e-4],
+                "model__lr": [1e-3, 3e-4],
                 "model__max_epochs": [500],
                 "model__batch_size": [48],
                 "model__callbacks__early_stopping__patience": [10],
-                "model__module__channels": [256, 512],
-                "model__module__kernel_size": [3, 5, 7],
-                "model__module__dropout": [0.0, 0.1],
+                "model__module__channels": [256],
+                "model__module__kernel_size": [3, 5],
+                "model__module__dropout": [0.1],
             },
         },
         {
             "name": "Reservoir",
             "param_grid": {
                 "model__optimizer__weight_decay": [0.0],
-                "model__lr": [4e-4, 8e-4],
+                "model__lr": [8e-4, 1e-3],
                 "model__max_epochs": [500],
                 "model__batch_size": [128],
                 "model__callbacks__early_stopping__patience": [10],
                 "model__module__reservoir_size": [400, 700],
                 "model__module__spectral_radius": [0.9],
                 "model__module__leak_rate": [0.85, 0.95],
-                "model__module__input_scaling": [0.35, 0.5],
-                "model__module__downsample": [8, 16],
+                "model__module__input_scaling": [0.5],
+                "model__module__downsample": [8],
             },
         },
     ]

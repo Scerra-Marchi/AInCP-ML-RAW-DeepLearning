@@ -9,8 +9,10 @@ _FEATURE_BUILDER_TYPES = {
     "magnitude",
     "enmo",
     "enmo_ai",
+    "enmo_ai_jerk",
     "enmo_jerk",
     "raw_enmo_ai",
+    "raw_enmo_ai_jerk",
     "raw_enmo",
     "raw_ai",
     "raw_ratio",
@@ -110,8 +112,10 @@ def build_signal_features(operation_type, D, ND):
         "ai",
         "enmo",
         "enmo_ai",
+        "enmo_ai_jerk",
         "enmo_jerk",
         "raw_enmo_ai",
+        "raw_enmo_ai_jerk",
         "raw_enmo",
         "raw_ai",
         "raw_ratio",
@@ -126,7 +130,9 @@ def build_signal_features(operation_type, D, ND):
     if operation_type in {
         "ai",
         "enmo_ai",
+        "enmo_ai_jerk",
         "raw_enmo_ai",
+        "raw_enmo_ai_jerk",
         "raw_ai",
         "raw_enmo_ai_ratio_jerk",
         "enmo_asymmetry",
@@ -137,7 +143,14 @@ def build_signal_features(operation_type, D, ND):
     if operation_type in {"raw_ratio", "raw_enmo_ai_ratio_jerk", "enmo_asymmetry", "enmo_asymmetry_jerk"}:
         enmo_log_ratio = compute_log_ratio(enmo_D, enmo_ND)
 
-    if operation_type in {"enmo_jerk", "raw_jerk", "raw_enmo_ai_ratio_jerk", "enmo_asymmetry_jerk"}:
+    if operation_type in {
+        "enmo_ai_jerk",
+        "enmo_jerk",
+        "raw_jerk",
+        "raw_enmo_ai_jerk",
+        "raw_enmo_ai_ratio_jerk",
+        "enmo_asymmetry_jerk",
+    }:
         jerk_D = compute_temporal_abs_diff(enmo_D)
         jerk_ND = compute_temporal_abs_diff(enmo_ND)
 
@@ -162,6 +175,9 @@ def build_signal_features(operation_type, D, ND):
 
     if operation_type == "enmo_ai":
         return np.stack((enmo_D, enmo_ND, ai), axis=2)
+
+    if operation_type == "enmo_ai_jerk":
+        return np.stack((enmo_D, enmo_ND, ai, jerk_D, jerk_ND), axis=2)
 
     if operation_type == "enmo_jerk":
         return np.stack((enmo_D, enmo_ND, jerk_D, jerk_ND), axis=2)
@@ -198,6 +214,20 @@ def build_signal_features(operation_type, D, ND):
 
     if operation_type == "raw_enmo_ai":
         return np.concatenate((D, ND, enmo_D[..., None], enmo_ND[..., None], ai[..., None]), axis=2)
+
+    if operation_type == "raw_enmo_ai_jerk":
+        return np.concatenate(
+            (
+                D,
+                ND,
+                enmo_D[..., None],
+                enmo_ND[..., None],
+                ai[..., None],
+                jerk_D[..., None],
+                jerk_ND[..., None],
+            ),
+            axis=2,
+        )
 
     if operation_type == "enmo_asymmetry":
         return np.stack((enmo_D, enmo_ND, bilateral_enmo, enmo_abs_diff, enmo_log_ratio, ai), axis=2)

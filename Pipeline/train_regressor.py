@@ -33,8 +33,6 @@ SENSOR_WINDOW_FEATURE_KEYS = (
     "enmo_mean_nd",
     "enmo_std_d",
     "enmo_std_nd",
-    "enmo_q90_d",
-    "enmo_q90_nd",
     "enmo_diff",
     "enmo_log_ratio",
     "signed_ai_enmo",
@@ -51,11 +49,11 @@ PREPROCESSING_CONFIG = {
 }
 
 GRU_MODEL_PARAM_GRID = {
-    "model__lr": [0.5, 0.1],
+    "model__lr": [0.05, 0.1, 0.5],
     "model__max_epochs": [500],
     "model__batch_size": [128],
-    "model__module__hidden_size": [256, 384],
-    "model__module__num_layers": [2, 3],
+    "model__module__hidden_size": [256, 512],
+    "model__module__num_layers": [2],
     "model__module__dropout": [0.1],
     "model__module__readout_mode": ["mean", "attention"],
     "model__optimizer__weight_decay": [0.0],
@@ -110,16 +108,12 @@ def regressor_model_path(save_folder, estimators_list):
 def build_block_feature_names(n_features, n_estimators):
     names = [f"classifier_{i}_block_mean" for i in range(n_estimators)]
     names += [f"classifier_{i}_block_std" for i in range(n_estimators)]
-    names += [f"classifier_{i}_block_q25" for i in range(n_estimators)]
-    names += [f"classifier_{i}_block_q75" for i in range(n_estimators)]
     names += [f"classifier_{i}_block_posrate" for i in range(n_estimators)]
     names += [
         "block_enmo_mean_d",
         "block_enmo_mean_nd",
         "block_enmo_std_d",
         "block_enmo_std_nd",
-        "block_enmo_q90_d",
-        "block_enmo_q90_nd",
         "block_enmo_diff",
         "block_enmo_log_ratio",
         "block_signed_ai_enmo",
@@ -224,8 +218,6 @@ def _build_block_sequence(
 
     block_mean = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_std = np.zeros((n_blocks, n_estimators), dtype=np.float32)
-    block_q25 = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
-    block_q75 = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_pos = np.full((n_blocks, n_estimators), 0.5, dtype=np.float32)
     block_sensor = np.zeros((n_blocks, len(SENSOR_WINDOW_FEATURE_KEYS)), dtype=np.float32)
     block_valid_fraction = np.zeros((n_blocks, 1), dtype=np.float32)
@@ -249,8 +241,6 @@ def _build_block_sequence(
             valid_vals = np.where(block_valid[:, None], block_probs, np.nan)
             block_mean[b] = np.nanmean(valid_vals, axis=0).astype(np.float32)
             block_std[b] = np.nanstd(valid_vals, axis=0).astype(np.float32)
-            block_q25[b] = np.nanquantile(valid_vals, 0.25, axis=0).astype(np.float32)
-            block_q75[b] = np.nanquantile(valid_vals, 0.75, axis=0).astype(np.float32)
             block_pos[b] = np.nanmean(
                 np.where(block_valid[:, None], block_probs >= POSITIVE_THRESHOLD, np.nan),
                 axis=0,
@@ -269,8 +259,6 @@ def _build_block_sequence(
         (
             block_mean,
             block_std,
-            block_q25,
-            block_q75,
             block_pos,
             block_sensor,
             block_valid_fraction,
@@ -445,7 +433,7 @@ def train_regressor(
         print("REGRESSOR: PATIENT", subject_metadata["subject"], "END")
 
     X_raw = np.asarray(raw_samples, dtype=object)
-    y = metadata["AHA"].to_numpy(dtype=np.float32).reshape(-1, 1)
+    y = metadata["AHA"].to_numpy(dtype=np.float32)
     strat_labels = pd.qcut(
         metadata["AHA"],
         q=6,

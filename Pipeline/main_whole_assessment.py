@@ -21,18 +21,12 @@ DATA_FOLDER = "../Dataset/"
 
 WINDOW_SIZE = 6400  # 4800 ≃ 180s, 6400 ≃ 240s, 8000 ≃ 300s
 DECIMATION_FACTOR = 3
-MODEL_NAMES = ["Transformer"]
+MODEL_NAMES = ["LSTM", "GRU", "RNN", "Transformer", "CNN1D", "Reservoir"]
 METHODS = [
     "raw",
-    "raw_enmo_ai_ratio_jerk",
-    "raw_enmo",
-    "raw_ai",
-    "raw_ratio",
-    "raw_jerk",
+    "raw_enmo_ai_jerk",
     "enmo_ai",
-    "enmo_jerk",
-    "enmo_asymmetry",
-    "enmo_asymmetry_jerk",
+    "enmo_ai_jerk",
 ]
 
 DEFAULT_ITERATIONS = TOTAL_FOLDS
@@ -41,7 +35,7 @@ DEFAULT_ITERATIONS = TOTAL_FOLDS
 # - Random guesser (rough baseline): ~0.50 on balanced classes (can be lower if imbalanced).
 # - Decent classifier: >= 0.60.
 # - Good classifier: >= 0.75.
-CV_MIN_MEAN_TEST_SCORE = 0.85
+CV_MIN_MEAN_TEST_SCORE = 0.75
 DEBUG_MIN_MEAN_TEST_SCORE = 0.0
 
 
