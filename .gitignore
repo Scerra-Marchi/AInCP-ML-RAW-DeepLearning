@@ -3,8 +3,10 @@ __pycache__/
 *.log
 .vscode/
 
-# ignore any folders inside each Iteration_* folder
-**/Iteration_*/**
+# ignore selected heavy artifacts inside each Iteration_* folder
+**/Iteration_*/**/*.joblib
+**/Iteration_*/**/pred_cache/
+**/Iteration_*/**/*.png
 
 # ignore the virtual environment
 **/venv/
