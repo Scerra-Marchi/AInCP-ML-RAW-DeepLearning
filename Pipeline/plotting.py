@@ -14,6 +14,7 @@ from train_regressor import (
     build_regressor_sample,
     regressor_model_path,
 )
+from signal_features import compute_enmo
 from read_file import read_file
 
 import torch
@@ -90,12 +91,28 @@ def _new_figure(kind, *, nrows=1, ncols=1, sharex=False, gridspec_kw=None):
 def _format_time_axis(ax):
     locator = matplotlib.dates.AutoDateLocator(minticks=4, maxticks=8)
     ax.xaxis.set_major_locator(locator)
-    ax.xaxis.set_major_formatter(matplotlib.dates.ConciseDateFormatter(locator))
+    ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter("%H:%M"))
 
 
 def _apply_axis_style(ax, *, grid_axis="y"):
     if grid_axis:
         ax.grid(axis=grid_axis, alpha=0.25)
+
+
+def _set_heatmap_time_ticks(ax, timeline_timestamps):
+    timeline_timestamps = np.asarray(timeline_timestamps, dtype=float)
+    if timeline_timestamps.size == 0:
+        return
+
+    tick_count = min(6, timeline_timestamps.size)
+    tick_positions = np.linspace(0, timeline_timestamps.size - 1, tick_count, dtype=int)
+    tick_positions = np.unique(tick_positions)
+    tick_labels = [
+        matplotlib.dates.num2date(float(timeline_timestamps[idx])).strftime("%H:%M")
+        for idx in tick_positions
+    ]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
 
 
 def _save_figure(fig, path_base):
@@ -171,6 +188,81 @@ def _timeline_bar_width(timeline_timestamps):
     if diffs.size == 0:
         return 1.0 / 24.0
     return float(0.8 * np.median(diffs))
+
+
+def _aggregate_window_timeline(
+    *,
+    prep,
+    window_timestamps,
+    invalid_mask,
+    window_size,
+    decimation_factor,
+    series=None,
+):
+    window_timestamps = np.asarray(window_timestamps, dtype=float)
+    invalid_mask = np.asarray(invalid_mask, dtype=bool)
+    series = None if series is None else np.asarray(series, dtype=float)
+
+    prep_mode = getattr(prep, "mode", "block")
+    if prep_mode != "block":
+        block_slices = [(idx, idx + 1) for idx in range(invalid_mask.size)]
+    else:
+        fs = getattr(prep, "fs", 80)
+        block_seconds = getattr(prep, "block_seconds", 3600)
+        seconds_per_window = window_size * decimation_factor / fs
+        steps_per_block = max(1, int(round(block_seconds / seconds_per_window)))
+        block_slices = [
+            (start, min(invalid_mask.size, start + steps_per_block))
+            for start in range(0, invalid_mask.size, steps_per_block)
+        ]
+
+    block_timestamps = np.zeros(len(block_slices), dtype=float)
+    block_invalid_mask = np.zeros(len(block_slices), dtype=bool)
+    block_valid_fraction = np.zeros(len(block_slices), dtype=float)
+    block_series = None if series is None else np.full(len(block_slices), np.nan, dtype=float)
+
+    for block_idx, (start, end) in enumerate(block_slices):
+        block_timestamps[block_idx] = float(window_timestamps[start:end].mean())
+        block_invalid = invalid_mask[start:end]
+        valid_mask = ~block_invalid
+        block_invalid_mask[block_idx] = bool(np.all(block_invalid))
+        block_valid_fraction[block_idx] = float(valid_mask.mean())
+        if series is not None and np.any(valid_mask):
+            block_series[block_idx] = float(np.mean(series[start:end][valid_mask]))
+
+    return block_timestamps, block_invalid_mask, block_valid_fraction, block_series
+
+
+def _format_feature_name(name):
+    classifier_tokens = name.split("_")
+    if len(classifier_tokens) >= 4 and classifier_tokens[0] == "classifier":
+        classifier_idx = int(classifier_tokens[1]) + 1
+        stat = classifier_tokens[-1]
+        stat_labels = {
+            "mean": "mean prediction",
+            "std": "prediction std",
+            "posrate": "positive-rate fraction",
+        }
+        return f"Classifier {classifier_idx} {stat_labels.get(stat, stat)}"
+
+    feature_labels = {
+        "block_enmo_mean_d": "Dominant ENMO mean",
+        "block_enmo_mean_nd": "Non-dominant ENMO mean",
+        "block_enmo_std_d": "Dominant ENMO std",
+        "block_enmo_std_nd": "Non-dominant ENMO std",
+        "block_enmo_diff": "ENMO difference",
+        "block_enmo_log_ratio": "ENMO log-ratio",
+        "block_signed_ai_enmo": "Signed AI ENMO",
+        "block_abs_ai_enmo": "Absolute AI ENMO",
+        "block_bilateral_enmo_mean": "Bilateral ENMO mean",
+        "block_fraction_d_gt_nd": "Dominant > non-dominant fraction",
+        "block_jerk_mean_d": "Dominant jerk mean",
+        "block_jerk_mean_nd": "Non-dominant jerk mean",
+        "block_valid_fraction": "Valid fraction",
+        "time_sin": "Time sine",
+        "time_cos": "Time cosine",
+    }
+    return feature_labels.get(name, name.replace("_", " "))
 
 
 def _subject_shap_time_of_day_data(
@@ -322,34 +414,6 @@ def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_
     _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_time_of_day_heatmap"))
 
 
-def _regressor_timeline_context(
-    *,
-    prep,
-    invalid_mask,
-    window_timestamps,
-    window_size,
-    decimation_factor,
-):
-    prep_mode = getattr(prep, "mode", "block")
-    if prep_mode != "block":
-        return window_timestamps, invalid_mask
-
-    fs = getattr(prep, "fs", 80)
-    block_seconds = getattr(prep, "block_seconds", 3600)
-    seconds_per_window = window_size * decimation_factor / fs
-    steps_per_block = max(1, int(round(block_seconds / seconds_per_window)))
-    n_windows = invalid_mask.size
-    n_blocks = int(np.ceil(n_windows / steps_per_block))
-
-    block_timestamps = np.zeros(n_blocks, dtype=float)
-    block_invalid_mask = np.zeros(n_blocks, dtype=bool)
-    for b in range(n_blocks):
-        start = b * steps_per_block
-        end = min(n_windows, (b + 1) * steps_per_block)
-        block_timestamps[b] = float(window_timestamps[start:end].mean())
-        block_invalid_mask[b] = bool(np.all(invalid_mask[start:end]))
-    return block_timestamps, block_invalid_mask
-
 def create_timestamps_list(data_folder, decimation_factor):
     patient_df = pd.read_csv(data_folder + 'week/1_week_RAW.csv', engine="pyarrow", usecols=['datetime'])
     step = max(1, int(decimation_factor))
@@ -445,14 +509,14 @@ def plot_dashboards(
         device=device,
     )
 
-    healthy_percentage = []
+    mean_prediction_list = []
     predicted_aha_list = []
 
     for entry in subject_entries:
         subject_metadata = entry["subject_metadata"]
         subject = int(subject_metadata['subject'])
         predictions = entry["predictions"]
-        hp_tot_list = entry["hp_tot_list"]
+        subject_mean_predictions = entry["hp_tot_list"]
         invalid_bitmap = entry["invalid_bitmap"]
         raw_input = entry["raw_input"]
         regressor_sequence = entry["regressor_sequence"]
@@ -460,12 +524,13 @@ def plot_dashboards(
         model_input = np.asarray([raw_input], dtype=object)
         invalid_mask = np.asarray(invalid_bitmap, dtype=bool)
         window_timestamps = timestamps[::window_size][:len(predictions[0])]
-        regressor_timestamps, regressor_invalid_mask = _regressor_timeline_context(
+        regressor_timestamps, regressor_invalid_mask, _, _ = _aggregate_window_timeline(
             prep=prep,
-            invalid_mask=invalid_mask,
             window_timestamps=window_timestamps,
+            invalid_mask=invalid_mask,
             window_size=window_size,
             decimation_factor=decimation_factor,
+            series=None,
         )
 
         mag_D, mag_ND = read_file(
@@ -477,7 +542,7 @@ def plot_dashboards(
             return_mag=1
         )
 
-        healthy_percentage.append(hp_tot_list)
+        mean_prediction_list.append(subject_mean_predictions)
         real_aha = subject_metadata['AHA']
 
         regressor_output = np.asarray(regressor.predict(model_input), dtype=float)
@@ -491,8 +556,8 @@ def plot_dashboards(
 
         print('Patient ', subject)
         print(' - AHA:     ', real_aha)
-        print(' - HP:      ', hp_tot_list)
-        print(' - AHA predicted from HP: ', predicted_aha)
+        print(' - Mean predictions: ', subject_mean_predictions)
+        print(' - Predicted AHA from mean predictions: ', predicted_aha)
 
         #################### EXPLAINABILITY ####################
 
@@ -521,30 +586,40 @@ def plot_dashboards(
         time_importance = np.mean(abs_attr, axis=1)
         signed_time_contribution = np.sum(attr, axis=1)
 
-        feature_names = build_block_feature_names(
-            n_features=regressor_sequence.shape[1],
-            n_estimators=len(predictions),
-        )
+        feature_names = [
+            _format_feature_name(name)
+            for name in build_block_feature_names(
+                n_features=regressor_sequence.shape[1],
+                n_estimators=len(predictions),
+            )
+        ]
 
         if regressor_timestamps.shape[0] != signed_time_contribution.shape[0]:
             aligned_len = min(regressor_timestamps.shape[0], signed_time_contribution.shape[0])
+            attr = attr[:aligned_len]
+            abs_attr = abs_attr[:aligned_len]
             regressor_timestamps = regressor_timestamps[:aligned_len]
             regressor_invalid_mask = regressor_invalid_mask[:aligned_len]
             time_importance = time_importance[:aligned_len]
             signed_time_contribution = signed_time_contribution[:aligned_len]
 
-        fig, ax = _new_figure("heatmap")
+        heatmap_height = max(4.2, 1.8 + 0.22 * len(feature_names))
+        fig, ax = plt.subplots(figsize=(6.6, heatmap_height), constrained_layout=True)
         vmax = np.nanpercentile(abs_attr, 99)
         if not np.isfinite(vmax) or vmax <= 0.0:
             vmax = 1.0
         im = ax.imshow(abs_attr.T, aspect="auto", cmap="inferno", vmin=0.0, vmax=vmax)
         fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="|SHAP value|")
-        ax.set_xlabel("Time window")
+        ax.set_xlabel("Time")
         ax.set_ylabel("Feature")
+        ax.set_yticks(np.arange(len(feature_names)))
+        ax.set_yticklabels(feature_names)
+        _set_heatmap_time_ticks(ax, regressor_timestamps)
         ax.set_title(f"Subject {subject} - SHAP heatmap")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_explain_heatmap"))
 
-        plt.figure(figsize=_figure_size("summary"))
+        summary_height = max(4.2, 1.8 + 0.24 * len(feature_names))
+        plt.figure(figsize=(6.4, summary_height))
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -557,13 +632,14 @@ def plot_dashboards(
                 feature_names=feature_names,
                 show=False,
                 plot_size=None,
+                max_display=len(feature_names),
             )
         fig = plt.gcf()
         fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP summary")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_summary"))
 
-        plt.figure(figsize=_figure_size("summary"))
+        plt.figure(figsize=(6.4, summary_height))
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -577,6 +653,7 @@ def plot_dashboards(
                 plot_type="bar",
                 show=False,
                 plot_size=None,
+                max_display=len(feature_names),
             )
         fig = plt.gcf()
         fig.set_constrained_layout(True)
@@ -584,10 +661,11 @@ def plot_dashboards(
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_summary_bar"))
 
         fig, ax = _new_figure("timeline")
-        ax.plot(time_importance, color="tab:orange")
-        ax.set_xlabel("Time window")
+        ax.plot(regressor_timestamps, time_importance, color="tab:orange")
+        ax.set_xlabel("Time")
         ax.set_ylabel("Mean |SHAP value|")
         ax.set_title(f"Subject {subject} - SHAP time importance")
+        _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_explain_time"))
 
@@ -618,7 +696,7 @@ def plot_dashboards(
 
         #########################################################
 
-        #################### ANDAMENTO WEEK GENERALE ####################
+        #################### WEEK MAGNITUDE ####################
         fig, ax = _new_figure("timeline")
         ax.plot(timestamps, mag_D, label="Dominant")
         ax.plot(timestamps, mag_ND, label="Non-dominant")
@@ -630,61 +708,85 @@ def plot_dashboards(
         ax.legend(loc="upper right")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_mag"))
 
-        #################### GRAFICO DEI PUNTI ####################
+        enmo_D = compute_enmo(mag_D)
+        enmo_ND = compute_enmo(mag_ND)
+
+        fig, ax = _new_figure("timeline")
+        ax.plot(timestamps, enmo_D, label="Dominant")
+        ax.plot(timestamps, enmo_ND, label="Non-dominant")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("ENMO")
+        ax.set_title(f"Subject {subject} - Week ENMO")
+        _format_time_axis(ax)
+        _apply_axis_style(ax, grid_axis="y")
+        ax.legend(loc="upper right")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_enmo"))
+
+        #################### WINDOW PREDICTIONS ####################
         fig, ax = _new_figure("timeline")
         ax.set_ylim([0,1])
-        for pred in predictions:
+        classifier_colors = plt.get_cmap("tab10").colors
+        for i, pred in enumerate(predictions):
             ax.scatter(
-                np.arange(len(pred)),
+                window_timestamps,
                 pred,
-                c=pred,
-                cmap="viridis",
-                norm=plt.Normalize(0, 1),
-                s=2,
+                color=classifier_colors[i % len(classifier_colors)],
+                s=6,
+                alpha=0.45,
                 linewidths=0,
+                label=f"Classifier {i + 1}",
             )
-        ax.set_xlabel("Sample")
+        ax.set_xlabel("Time")
         ax.set_ylabel("Classifier output")
         ax.set_title(f"Subject {subject} - Window predictions")
+        _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
+        if len(predictions) > 1:
+            ax.legend(loc="best")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_samples"))
 
-        #################### CPI TIMELINE ####################
-        valid_per_window = (~invalid_mask).astype(float)
-        cumulative_valid_count = np.cumsum(valid_per_window)
+        #################### MEAN PREDICTION TIMELINE ####################
 
         fig, ax = _new_figure("timeline")
         ax.set_ylim([0,1])
         _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
         for i, pred in enumerate(predictions):
-            pred = np.asarray(pred, dtype=float)
-            cumulative_valid_sum = np.cumsum(np.where(~invalid_mask, pred, 0.0))
-            cpi_timeline = np.divide(
-                cumulative_valid_sum,
-                cumulative_valid_count,
-                out=np.full(cumulative_valid_sum.shape, np.nan, dtype=float),
-                where=cumulative_valid_count > 0,
+            block_timestamps, _, _, block_mean_prediction = _aggregate_window_timeline(
+                prep=prep,
+                window_timestamps=window_timestamps,
+                invalid_mask=invalid_mask,
+                window_size=window_size,
+                decimation_factor=decimation_factor,
+                series=pred,
             )
-            ax.plot(window_timestamps, cpi_timeline, label=f"classifier_{i}")
+            ax.plot(block_timestamps, block_mean_prediction, label=f"Classifier {i + 1}")
         if len(predictions) > 1:
             ax.legend(loc="best")
         ax.set_xlabel("Time")
-        ax.set_ylabel("CPI")
-        ax.set_title(f"Subject {subject} - CPI timeline")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_CPI_timeline"))
+        ax.set_ylabel("Mean prediction")
+        ax.set_title(f"Subject {subject} - Mean prediction timeline")
+        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_mean_prediction_timeline"))
 
-        ##################### SIGNIFICATIVITY TIMELINE ######################
-        significance_timeline = (100.0 * cumulative_valid_count) / np.arange(1, len(invalid_mask) + 1, dtype=float)
+        ##################### VALIDITY TIMELINE ######################
+        validity_timestamps, _, block_valid_fraction, _ = _aggregate_window_timeline(
+            prep=prep,
+            window_timestamps=window_timestamps,
+            invalid_mask=invalid_mask,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+            series=None,
+        )
+        validity_timeline = 100.0 * block_valid_fraction
 
         fig, ax = _new_figure("timeline")
         ax.set_ylim([0,100])
         _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
-        ax.plot(window_timestamps, significance_timeline, color="tab:purple")
+        ax.plot(validity_timestamps, validity_timeline, color="tab:purple")
         ax.set_xlabel("Time")
         ax.set_ylabel(_percent_label("Validity (%)"))
-        ax.set_title(f"Subject {subject} - Validity timeline")
+        ax.set_title(f"Subject {subject} - Local validity timeline")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_validity_timeline"))
 
         ##################### PREDICTED AHA PLOT ####################
@@ -714,7 +816,7 @@ def plot_dashboards(
         ax.plot(regressor_timestamps, aha_timeline_valid_only, color="tab:green", label="Predicted AHA")
         ax.set_xlabel("Time")
         ax.set_ylabel("DAB")
-        ax.set_title(f"Subject {subject} - Predicted AHA")
+        ax.set_title(f"Subject {subject} - DAB")
         ax.legend(loc="best")
         _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_DAB"))
 
@@ -729,7 +831,7 @@ def plot_dashboards(
         )
 
     metadata_out = metadata.copy()
-    metadata_out['healthy_percentage'] = healthy_percentage
+    metadata_out['mean_prediction_list'] = mean_prediction_list
     metadata_out['predicted_aha'] = predicted_aha_list
     metadata_out.to_csv(os.path.join(stats_folder, "predictions_dataframe.csv"), index=False)
 
@@ -744,7 +846,12 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
         predictions_dataframe = pd.concat([predictions_dataframe, folder_dataframe])
         counter += 1
 
-    CPI_list_list = predictions_dataframe['healthy_percentage'].apply(json.loads).tolist()
+    mean_prediction_column = (
+        "mean_prediction_list"
+        if "mean_prediction_list" in predictions_dataframe.columns
+        else "healthy_percentage"
+    )
+    mean_prediction_lists = predictions_dataframe[mean_prediction_column].apply(json.loads).tolist()
 
     cdict = {0:'green', 1: 'gold', 2: 'orange', 3: 'red'}
     fig, axs = plt.subplots(1, 3, figsize=_figure_size("corrcoeff"), constrained_layout=True)
@@ -754,9 +861,9 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
     scatter_marker = np.array([])
     group = np.array([])
 
-    for sublist, aha, macs, iteration in zip(CPI_list_list, predictions_dataframe['AHA'].values, predictions_dataframe['MACS'].values, predictions_dataframe['iteration'].values):
-        for cpi in sublist:
-            scatter_x = np.append(scatter_x, cpi)
+    for sublist, aha, macs, iteration in zip(mean_prediction_lists, predictions_dataframe['AHA'].values, predictions_dataframe['MACS'].values, predictions_dataframe['iteration'].values):
+        for mean_prediction in sublist:
+            scatter_x = np.append(scatter_x, mean_prediction)
             scatter_y = np.append(scatter_y, aha)
             scatter_marker = np.append(scatter_marker, iteration)
             group = np.append(group, macs)
@@ -771,10 +878,10 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
         plotted_labels.add(g)
 
     axs[0].legend()
-    axs[0].set_xlabel('CPI')
+    axs[0].set_xlabel('Mean prediction')
     axs[0].set_ylabel('AHA')
 
-    scatter_x = np.array([sublist[0] for sublist in CPI_list_list])
+    scatter_x = np.array([sublist[0] for sublist in mean_prediction_lists])
     scatter_y = np.array(predictions_dataframe['AHA'].values)
     scatter_marker = np.array(predictions_dataframe['iteration'].values)
     group = np.array(predictions_dataframe['MACS'].values)
@@ -789,7 +896,7 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
         plotted_labels.add(g)
 
     axs[1].legend()
-    axs[1].set_xlabel('CPI')
+    axs[1].set_xlabel('Mean prediction')
     axs[1].set_ylabel('AHA')
 
     scatter_x = np.array(predictions_dataframe['predicted_aha'].values)
@@ -805,4 +912,4 @@ def plot_corrcoeff(iterations_folders:list, save_folder:str):
     axs[2].set_xlabel('DAB')
     axs[2].set_ylabel('AHA')
 
-    _save_figure(fig, os.path.join(save_folder, "Scatter_AHA_CPI_DAB"))
+    _save_figure(fig, os.path.join(save_folder, "Scatter_AHA_mean_prediction_DAB"))
