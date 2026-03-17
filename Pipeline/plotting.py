@@ -64,6 +64,10 @@ def _figure_size(kind):
     return THESIS_PLOT_SIZES[kind]
 
 
+def _day_number_label(day_value, first_day_value):
+    return f"Day {int(round(float(day_value) - float(first_day_value))) + 1}"
+
+
 def _new_figure(kind, *, nrows=1, ncols=1, sharex=False, gridspec_kw=None):
     return plt.subplots(
         nrows,
@@ -91,16 +95,24 @@ def _set_heatmap_time_ticks(ax, timeline_timestamps):
     if timeline_timestamps.size == 0:
         return
 
-    tick_count = min(6, timeline_timestamps.size)
-    tick_positions = np.linspace(0, timeline_timestamps.size - 1, tick_count, dtype=int)
-    tick_positions = np.unique(tick_positions)
     spans_multiple_days = np.floor(timeline_timestamps[-1]) > np.floor(timeline_timestamps[0])
-    tick_labels = [
-        matplotlib.dates.num2date(float(timeline_timestamps[idx])).strftime(
-            "%a\n%H:%M" if spans_multiple_days else "%H:%M"
-        )
-        for idx in tick_positions
-    ]
+    if spans_multiple_days:
+        day_numbers = np.floor(timeline_timestamps)
+        unique_days, first_positions = np.unique(day_numbers, return_index=True)
+        first_day = unique_days[0]
+        tick_positions = first_positions
+        tick_labels = [
+            _day_number_label(day_value, first_day)
+            for day_value in unique_days
+        ]
+    else:
+        tick_count = min(6, timeline_timestamps.size)
+        tick_positions = np.linspace(0, timeline_timestamps.size - 1, tick_count, dtype=int)
+        tick_positions = np.unique(tick_positions)
+        tick_labels = [
+            matplotlib.dates.num2date(float(timeline_timestamps[idx])).strftime("%H:%M")
+            for idx in tick_positions
+        ]
     ax.set_xticks(tick_positions)
     ax.set_xticklabels(tick_labels)
 
@@ -452,8 +464,9 @@ def _subject_shap_time_of_day_data(
     )
     mean_signed = np.nanmean(signed_matrix, axis=0)
     mean_abs = np.nanmean(abs_matrix, axis=0)
+    first_day = unique_days[0]
     day_labels = [
-        matplotlib.dates.num2date(float(day_value)).strftime("%a")
+        _day_number_label(day_value, first_day)
         for day_value in unique_days
     ]
 
