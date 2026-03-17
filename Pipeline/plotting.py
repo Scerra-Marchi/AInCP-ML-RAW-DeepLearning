@@ -265,6 +265,153 @@ def _format_feature_name(name):
     return feature_labels.get(name, name.replace("_", " "))
 
 
+def _feature_group_name(name):
+    if name.startswith("classifier_") and name.endswith("_mean"):
+        return "Classifier mean prediction"
+    if name.startswith("classifier_") and name.endswith("_std"):
+        return "Classifier prediction std"
+    if name.startswith("classifier_") and name.endswith("_posrate"):
+        return "Classifier positive-rate"
+    if "enmo" in name:
+        return "ENMO features"
+    if "jerk" in name:
+        return "Jerk features"
+    if name == "block_valid_fraction":
+        return "Validity"
+    if name in {"time_sin", "time_cos"}:
+        return "Circadian features"
+    return "Other"
+
+
+def _plot_global_feature_importance(global_stats_folder, feature_names, subject_feature_importances):
+    if not subject_feature_importances:
+        return
+
+    subject_feature_importances = np.asarray(subject_feature_importances, dtype=float)
+    global_importance = np.nanmean(subject_feature_importances, axis=0)
+    order = np.argsort(global_importance)[::-1]
+
+    ordered_names = [feature_names[idx] for idx in order]
+    ordered_importance = global_importance[order]
+
+    fig_height = max(4.4, 1.8 + 0.24 * len(ordered_names))
+    fig, ax = plt.subplots(figsize=(6.6, fig_height), constrained_layout=True)
+    ax.barh(np.arange(len(ordered_names)), ordered_importance[::-1], color="#2a9d8f")
+    ax.set_yticks(np.arange(len(ordered_names)))
+    ax.set_yticklabels(ordered_names[::-1])
+    ax.set_xlabel("Mean |SHAP value|")
+    ax.set_title("Global feature importance")
+    _apply_axis_style(ax, grid_axis="x")
+    _save_figure(fig, os.path.join(global_stats_folder, "global_feature_importance"))
+
+
+def _plot_global_grouped_importance(global_stats_folder, raw_feature_names, subject_feature_importances):
+    if not subject_feature_importances:
+        return
+
+    group_names = []
+    for raw_name in raw_feature_names:
+        group_name = _feature_group_name(raw_name)
+        if group_name not in group_names:
+            group_names.append(group_name)
+
+    grouped_subject_importances = []
+    for subject_values in subject_feature_importances:
+        grouped_values = []
+        subject_values = np.asarray(subject_values, dtype=float)
+        for group_name in group_names:
+            mask = np.array([_feature_group_name(name) == group_name for name in raw_feature_names], dtype=bool)
+            grouped_values.append(float(np.nansum(subject_values[mask])))
+        grouped_subject_importances.append(grouped_values)
+
+    grouped_subject_importances = np.asarray(grouped_subject_importances, dtype=float)
+    global_grouped_importance = np.nanmean(grouped_subject_importances, axis=0)
+    order = np.argsort(global_grouped_importance)[::-1]
+
+    ordered_names = [group_names[idx] for idx in order]
+    ordered_importance = global_grouped_importance[order]
+
+    fig_height = max(4.0, 1.8 + 0.4 * len(ordered_names))
+    fig, ax = plt.subplots(figsize=(6.4, fig_height), constrained_layout=True)
+    ax.barh(np.arange(len(ordered_names)), ordered_importance[::-1], color="#7a6f9b")
+    ax.set_yticks(np.arange(len(ordered_names)))
+    ax.set_yticklabels(ordered_names[::-1])
+    ax.set_xlabel("Mean summed |SHAP value|")
+    ax.set_title("Global grouped feature importance")
+    _apply_axis_style(ax, grid_axis="x")
+    _save_figure(fig, os.path.join(global_stats_folder, "global_grouped_feature_importance"))
+
+
+def _plot_global_shap_summary(global_stats_folder, global_attr_rows, global_feature_rows, feature_names):
+    if not global_attr_rows or not global_feature_rows:
+        return
+
+    attr_matrix = np.vstack(global_attr_rows)
+    feature_matrix = np.vstack(global_feature_rows)
+    summary_height = max(4.4, 1.8 + 0.24 * len(feature_names))
+
+    plt.figure(figsize=(6.4, summary_height))
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The NumPy global RNG was seeded by calling `np.random.seed`.*",
+            category=FutureWarning,
+        )
+        shap.summary_plot(
+            attr_matrix,
+            features=feature_matrix,
+            feature_names=feature_names,
+            show=False,
+            plot_size=None,
+            max_display=len(feature_names),
+        )
+    fig = plt.gcf()
+    fig.set_constrained_layout(True)
+    plt.title("Global SHAP summary")
+    _save_figure(fig, os.path.join(global_stats_folder, "global_shap_summary"))
+
+
+def _plot_global_time_of_day_importance(global_stats_folder, subject_cycle_data_list):
+    if not subject_cycle_data_list:
+        return
+
+    all_slots = sorted(
+        {
+            float(slot_value)
+            for subject_cycle_data in subject_cycle_data_list
+            for slot_value in subject_cycle_data["slot_values"]
+        }
+    )
+    if not all_slots:
+        return
+
+    aligned_matrix = np.full((len(subject_cycle_data_list), len(all_slots)), np.nan, dtype=float)
+    slot_to_index = {slot_value: idx for idx, slot_value in enumerate(all_slots)}
+    for subject_idx, subject_cycle_data in enumerate(subject_cycle_data_list):
+        for slot_value, mean_abs_value in zip(
+            subject_cycle_data["slot_values"],
+            subject_cycle_data["mean_abs"],
+        ):
+            aligned_matrix[subject_idx, slot_to_index[float(slot_value)]] = float(mean_abs_value)
+
+    global_mean_abs = np.nanmean(aligned_matrix, axis=0)
+    if not np.any(np.isfinite(global_mean_abs)):
+        return
+
+    slot_hours = np.asarray(all_slots, dtype=float) * 24.0
+    fig, ax = _new_figure("timeline")
+    ax.plot(slot_hours, global_mean_abs, color="#d17c1f")
+    ax.set_xlim(0.0, 24.0)
+    ax.set_xlabel("Time of day")
+    ax.set_ylabel("Mean |SHAP value|")
+    ax.set_title("Global time-of-day importance")
+    tick_hours = np.arange(0, 24, 2)
+    ax.set_xticks(tick_hours)
+    ax.set_xticklabels([f"{int(hour):02d}:00" for hour in tick_hours])
+    _apply_axis_style(ax, grid_axis="y")
+    _save_figure(fig, os.path.join(global_stats_folder, "global_time_of_day_importance"))
+
+
 def _subject_shap_time_of_day_data(
     *,
     timeline_timestamps,
@@ -440,6 +587,8 @@ def plot_dashboards(
 
     stats_folder = os.path.join(save_folder, "Week_stats")
     os.makedirs(stats_folder, exist_ok=True)
+    global_stats_folder = os.path.join(stats_folder, "Global_explainability")
+    os.makedirs(global_stats_folder, exist_ok=True)
 
     best_estimators_df = pd.read_csv(save_folder+'best_estimators_results.csv', index_col=0)\
                              .sort_values(by=['mean_test_score', 'std_test_score'], ascending=False)
@@ -511,10 +660,18 @@ def plot_dashboards(
 
     mean_prediction_list = []
     predicted_aha_list = []
+    global_subject_feature_importances = []
+    global_attr_rows = []
+    global_feature_rows = []
+    global_subject_cycle_data = []
+    global_raw_feature_names = None
+    global_feature_names = None
 
     for entry in subject_entries:
         subject_metadata = entry["subject_metadata"]
         subject = int(subject_metadata['subject'])
+        subject_stats_folder = os.path.join(stats_folder, f"subject_{subject}")
+        os.makedirs(subject_stats_folder, exist_ok=True)
         predictions = entry["predictions"]
         subject_mean_predictions = entry["hp_tot_list"]
         invalid_bitmap = entry["invalid_bitmap"]
@@ -586,22 +743,31 @@ def plot_dashboards(
         time_importance = np.mean(abs_attr, axis=1)
         signed_time_contribution = np.sum(attr, axis=1)
 
-        feature_names = [
-            _format_feature_name(name)
-            for name in build_block_feature_names(
-                n_features=regressor_sequence.shape[1],
-                n_estimators=len(predictions),
-            )
-        ]
+        raw_feature_names = build_block_feature_names(
+            n_features=regressor_sequence.shape[1],
+            n_estimators=len(predictions),
+        )
+        feature_names = [_format_feature_name(name) for name in raw_feature_names]
+        if global_raw_feature_names is None:
+            global_raw_feature_names = raw_feature_names
+            global_feature_names = feature_names
 
         if regressor_timestamps.shape[0] != signed_time_contribution.shape[0]:
             aligned_len = min(regressor_timestamps.shape[0], signed_time_contribution.shape[0])
             attr = attr[:aligned_len]
             abs_attr = abs_attr[:aligned_len]
+            regressor_sequence_scaled = regressor_sequence_scaled[:aligned_len]
             regressor_timestamps = regressor_timestamps[:aligned_len]
             regressor_invalid_mask = regressor_invalid_mask[:aligned_len]
             time_importance = time_importance[:aligned_len]
             signed_time_contribution = signed_time_contribution[:aligned_len]
+
+        valid_regressor_mask = ~regressor_invalid_mask
+        if np.any(valid_regressor_mask):
+            subject_feature_importance = np.nanmean(abs_attr[valid_regressor_mask], axis=0)
+            global_subject_feature_importances.append(subject_feature_importance)
+            global_attr_rows.append(attr[valid_regressor_mask])
+            global_feature_rows.append(regressor_sequence_scaled[valid_regressor_mask])
 
         heatmap_height = max(4.2, 1.8 + 0.22 * len(feature_names))
         fig, ax = plt.subplots(figsize=(6.6, heatmap_height), constrained_layout=True)
@@ -616,7 +782,7 @@ def plot_dashboards(
         ax.set_yticklabels(feature_names)
         _set_heatmap_time_ticks(ax, regressor_timestamps)
         ax.set_title(f"Subject {subject} - SHAP heatmap")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_explain_heatmap"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_explain_heatmap"))
 
         summary_height = max(4.2, 1.8 + 0.24 * len(feature_names))
         plt.figure(figsize=(6.4, summary_height))
@@ -637,7 +803,7 @@ def plot_dashboards(
         fig = plt.gcf()
         fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP summary")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_summary"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_shap_summary"))
 
         plt.figure(figsize=(6.4, summary_height))
         with warnings.catch_warnings():
@@ -658,7 +824,7 @@ def plot_dashboards(
         fig = plt.gcf()
         fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP bar summary")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_summary_bar"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_shap_summary_bar"))
 
         fig, ax = _new_figure("timeline")
         ax.plot(regressor_timestamps, time_importance, color="tab:orange")
@@ -667,7 +833,7 @@ def plot_dashboards(
         ax.set_title(f"Subject {subject} - SHAP time importance")
         _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_explain_time"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_explain_time"))
 
         bar_width = _timeline_bar_width(regressor_timestamps)
         bar_colors = [
@@ -692,7 +858,7 @@ def plot_dashboards(
         ax_contrib.set_xlabel("Time")
         ax_contrib.set_title(f"Subject {subject} - SHAP directional time contributions")
         _format_time_axis(ax_contrib)
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_time_direction"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_shap_time_direction"))
 
         #########################################################
 
@@ -706,7 +872,7 @@ def plot_dashboards(
         _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
         ax.legend(loc="upper right")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_mag"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_mag"))
 
         enmo_D = compute_enmo(mag_D)
         enmo_ND = compute_enmo(mag_ND)
@@ -720,7 +886,7 @@ def plot_dashboards(
         _format_time_axis(ax)
         _apply_axis_style(ax, grid_axis="y")
         ax.legend(loc="upper right")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_enmo"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_enmo"))
 
         #################### WINDOW PREDICTIONS ####################
         fig, ax = _new_figure("timeline")
@@ -743,7 +909,7 @@ def plot_dashboards(
         _apply_axis_style(ax, grid_axis="y")
         if len(predictions) > 1:
             ax.legend(loc="best")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_samples"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_samples"))
 
         #################### MEAN PREDICTION TIMELINE ####################
 
@@ -766,7 +932,7 @@ def plot_dashboards(
         ax.set_xlabel("Time")
         ax.set_ylabel("Mean prediction")
         ax.set_title(f"Subject {subject} - Mean prediction timeline")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_mean_prediction_timeline"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_mean_prediction_timeline"))
 
         ##################### VALIDITY TIMELINE ######################
         validity_timestamps, _, block_valid_fraction, _ = _aggregate_window_timeline(
@@ -787,7 +953,7 @@ def plot_dashboards(
         ax.set_xlabel("Time")
         ax.set_ylabel(_percent_label("Validity (%)"))
         ax.set_title(f"Subject {subject} - Local validity timeline")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_validity_timeline"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_validity_timeline"))
 
         ##################### PREDICTED AHA PLOT ####################
         prev_return_last_step = getattr(net, "return_last_step", None)
@@ -818,22 +984,47 @@ def plot_dashboards(
         ax.set_ylabel("DAB")
         ax.set_title(f"Subject {subject} - DAB")
         ax.legend(loc="best")
-        _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_DAB"))
+        _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_DAB"))
 
-        _plot_subject_shap_time_of_day_heatmap(
-            stats_folder,
-            subject,
-            _subject_shap_time_of_day_data(
-                timeline_timestamps=regressor_timestamps,
-                signed_time_contribution=signed_time_contribution,
-                invalid_mask=regressor_invalid_mask,
-            ),
+        subject_cycle_data = _subject_shap_time_of_day_data(
+            timeline_timestamps=regressor_timestamps,
+            signed_time_contribution=signed_time_contribution,
+            invalid_mask=regressor_invalid_mask,
         )
+        _plot_subject_shap_time_of_day_heatmap(
+            subject_stats_folder,
+            subject,
+            subject_cycle_data,
+        )
+        if subject_cycle_data is not None:
+            global_subject_cycle_data.append(subject_cycle_data)
 
     metadata_out = metadata.copy()
     metadata_out['mean_prediction_list'] = mean_prediction_list
     metadata_out['predicted_aha'] = predicted_aha_list
     metadata_out.to_csv(os.path.join(stats_folder, "predictions_dataframe.csv"), index=False)
+
+    if global_feature_names is not None and global_raw_feature_names is not None:
+        _plot_global_feature_importance(
+            global_stats_folder,
+            global_feature_names,
+            global_subject_feature_importances,
+        )
+        _plot_global_grouped_importance(
+            global_stats_folder,
+            global_raw_feature_names,
+            global_subject_feature_importances,
+        )
+        _plot_global_shap_summary(
+            global_stats_folder,
+            global_attr_rows,
+            global_feature_rows,
+            global_feature_names,
+        )
+    _plot_global_time_of_day_importance(
+        global_stats_folder,
+        global_subject_cycle_data,
+    )
 
 
 def plot_corrcoeff(iterations_folders:list, save_folder:str):
