@@ -7,6 +7,7 @@ __pycache__/
 **/Iteration_*/**/*.joblib
 **/Iteration_*/**/pred_cache/
 **/Iteration_*/**/*.png
+**/Iteration_*/**/*.pdf
 
 # ignore the virtual environment
 **/venv/
