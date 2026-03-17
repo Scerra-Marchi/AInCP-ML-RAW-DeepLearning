@@ -1,0 +1,17 @@
+{
+    "Best index": 0,
+    "Best score": 0.6076531365923314,
+    "Refit time": 246.17611145973206,
+    "Best params": {
+        "model__batch_size": 128,
+        "model__callbacks__early_stopping__patience": 10,
+        "model__lr": 0.0008,
+        "model__max_epochs": 500,
+        "model__module__downsample": 8,
+        "model__module__input_scaling": 0.5,
+        "model__module__leak_rate": 0.85,
+        "model__module__reservoir_size": 400,
+        "model__module__spectral_radius": 0.9,
+        "model__optimizer__weight_decay": 0.0
+    }
+}
