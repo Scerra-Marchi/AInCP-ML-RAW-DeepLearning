@@ -1,6 +1,5 @@
 import os
 import json
-import shutil
 import warnings
 import pandas as pd
 from itertools import product
@@ -36,7 +35,6 @@ def _configure_plot_style():
     if _PLOT_STYLE_CONFIGURED:
         return
 
-    latex_available = shutil.which("latex") is not None
     base_params = {
         "font.size": 10,
         "axes.titlesize": 11,
@@ -51,24 +49,13 @@ def _configure_plot_style():
         "axes.unicode_minus": False,
     }
     matplotlib.rcParams.update(base_params)
-
-    if latex_available:
-        matplotlib.rcParams.update(
-            {
-                "text.usetex": True,
-                "font.family": "serif",
-                "font.serif": ["Times"],
-                "text.latex.preamble": r"\usepackage{mathptmx}",
-            }
-        )
-    else:
-        matplotlib.rcParams.update(
-            {
-                "text.usetex": False,
-                "font.family": "serif",
-                "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "DejaVu Serif"],
-            }
-        )
+    matplotlib.rcParams.update(
+        {
+            "text.usetex": False,
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "DejaVu Serif"],
+        }
+    )
 
     _PLOT_STYLE_CONFIGURED = True
 
@@ -107,8 +94,11 @@ def _set_heatmap_time_ticks(ax, timeline_timestamps):
     tick_count = min(6, timeline_timestamps.size)
     tick_positions = np.linspace(0, timeline_timestamps.size - 1, tick_count, dtype=int)
     tick_positions = np.unique(tick_positions)
+    spans_multiple_days = np.floor(timeline_timestamps[-1]) > np.floor(timeline_timestamps[0])
     tick_labels = [
-        matplotlib.dates.num2date(float(timeline_timestamps[idx])).strftime("%H:%M")
+        matplotlib.dates.num2date(float(timeline_timestamps[idx])).strftime(
+            "%a\n%H:%M" if spans_multiple_days else "%H:%M"
+        )
         for idx in tick_positions
     ]
     ax.set_xticks(tick_positions)
@@ -366,7 +356,6 @@ def _plot_global_shap_summary(global_stats_folder, global_attr_rows, global_feat
             max_display=len(feature_names),
         )
     fig = plt.gcf()
-    fig.set_constrained_layout(True)
     plt.title("Global SHAP summary")
     _save_figure(fig, os.path.join(global_stats_folder, "global_shap_summary"))
 
@@ -801,7 +790,6 @@ def plot_dashboards(
                 max_display=len(feature_names),
             )
         fig = plt.gcf()
-        fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP summary")
         _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_shap_summary"))
 
@@ -822,7 +810,6 @@ def plot_dashboards(
                 max_display=len(feature_names),
             )
         fig = plt.gcf()
-        fig.set_constrained_layout(True)
         plt.title(f"Subject {subject} - SHAP bar summary")
         _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_shap_summary_bar"))
 
