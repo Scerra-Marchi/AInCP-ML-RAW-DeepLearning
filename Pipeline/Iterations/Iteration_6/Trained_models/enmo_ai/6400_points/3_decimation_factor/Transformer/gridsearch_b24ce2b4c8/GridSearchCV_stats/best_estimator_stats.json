@@ -1,0 +1,18 @@
+{
+    "Best index": 17,
+    "Best score": 0.8619087883960741,
+    "Refit time": 8.799735069274902,
+    "Best params": {
+        "model__batch_size": 64,
+        "model__callbacks__early_stopping__patience": 10,
+        "model__lr": 3e-05,
+        "model__max_epochs": 500,
+        "model__module__d_model": 96,
+        "model__module__dim_feedforward": 384,
+        "model__module__dropout": 0.1,
+        "model__module__nhead": 4,
+        "model__module__num_layers": 2,
+        "model__module__patch_size": 32,
+        "model__optimizer__weight_decay": 0.0001
+    }
+}

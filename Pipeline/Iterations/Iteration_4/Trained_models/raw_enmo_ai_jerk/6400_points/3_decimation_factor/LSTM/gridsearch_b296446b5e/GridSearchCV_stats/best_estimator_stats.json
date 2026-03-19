@@ -1,0 +1,17 @@
+{
+    "Best index": 6,
+    "Best score": 0.7265666043419674,
+    "Refit time": 291.9792912006378,
+    "Best params": {
+        "model__batch_size": 128,
+        "model__callbacks__early_stopping__patience": 10,
+        "model__lr": 0.001,
+        "model__max_epochs": 500,
+        "model__module__bidirectional": true,
+        "model__module__dropout": 0.1,
+        "model__module__hidden_size": 128,
+        "model__module__num_layers": 2,
+        "model__module__readout_mode": "attention",
+        "model__optimizer__weight_decay": 0.0001
+    }
+}
