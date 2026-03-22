@@ -1,0 +1,46 @@
+{
+    "Classifier Label": "Best classifier (Classifier 1)",
+    "Method": "enmo_ai",
+    "Window Size": 6400,
+    "Decimation Factor": 3,
+    "Model Type": "Transformer",
+    "Gridsearch Hash": "b24ce2b4c8",
+    "Mean Test Score": 0.8844759600171654,
+    "Std Test Score": 0.0428671380569403,
+    "Total AHA Windows": 34,
+    "Valid AHA Windows": 34,
+    "Test Subjects": [
+        16,
+        23,
+        29,
+        37,
+        41,
+        61,
+        64,
+        73
+    ],
+    "Healthy Window Fraction": 0.17647058823529413,
+    "Mean AHA Across Valid Windows": 64.32352941176471,
+    "Mean Predicted Probability": 0.2982628643512726,
+    "Background Samples": 34,
+    "Top Features": [
+        {
+            "feature": "Asymmetry index",
+            "mean_abs_shap_value": 0.0023449460252643176,
+            "mean_signed_shap_value": -4.446478489856553e-06,
+            "mean_feature_value_test": 0.11150401482560882
+        },
+        {
+            "feature": "Dominant ENMO",
+            "mean_abs_shap_value": 0.0018452279876186683,
+            "mean_signed_shap_value": 3.282064734559415e-06,
+            "mean_feature_value_test": -0.01647589400795804
+        },
+        {
+            "feature": "Non-dominant ENMO",
+            "mean_abs_shap_value": 0.0016078366837532086,
+            "mean_signed_shap_value": 1.0186507514364849e-05,
+            "mean_feature_value_test": -0.06477514420949307
+        }
+    ]
+}

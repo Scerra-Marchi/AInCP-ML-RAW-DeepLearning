@@ -285,7 +285,14 @@ def _feature_group_name(name):
     return "Other"
 
 
-def _plot_global_feature_importance(global_stats_folder, feature_names, subject_feature_importances):
+def _plot_global_feature_importance(
+    global_stats_folder,
+    feature_names,
+    subject_feature_importances,
+    *,
+    title="Global feature importance",
+    file_stem="global_feature_importance",
+):
     if not subject_feature_importances:
         return
 
@@ -302,9 +309,9 @@ def _plot_global_feature_importance(global_stats_folder, feature_names, subject_
     ax.set_yticks(np.arange(len(ordered_names)))
     ax.set_yticklabels(ordered_names[::-1])
     ax.set_xlabel("Mean |SHAP value|")
-    ax.set_title("Global feature importance")
+    ax.set_title(title)
     _apply_axis_style(ax, grid_axis="x")
-    _save_figure(fig, os.path.join(global_stats_folder, "global_feature_importance"))
+    _save_figure(fig, os.path.join(global_stats_folder, file_stem))
 
 
 def _plot_global_grouped_importance(global_stats_folder, raw_feature_names, subject_feature_importances):
@@ -344,7 +351,15 @@ def _plot_global_grouped_importance(global_stats_folder, raw_feature_names, subj
     _save_figure(fig, os.path.join(global_stats_folder, "global_grouped_feature_importance"))
 
 
-def _plot_global_shap_summary(global_stats_folder, global_attr_rows, global_feature_rows, feature_names):
+def _plot_global_shap_summary(
+    global_stats_folder,
+    global_attr_rows,
+    global_feature_rows,
+    feature_names,
+    *,
+    title="Global SHAP summary",
+    file_stem="global_shap_summary",
+):
     if not global_attr_rows or not global_feature_rows:
         return
 
@@ -368,8 +383,8 @@ def _plot_global_shap_summary(global_stats_folder, global_attr_rows, global_feat
             max_display=len(feature_names),
         )
     fig = plt.gcf()
-    plt.title("Global SHAP summary")
-    _save_figure(fig, os.path.join(global_stats_folder, "global_shap_summary"))
+    plt.title(title)
+    _save_figure(fig, os.path.join(global_stats_folder, file_stem))
 
 
 def _plot_global_time_of_day_importance(global_stats_folder, subject_cycle_data_list):

@@ -1,0 +1,58 @@
+{
+    "Classifier Label": "Best classifier (Classifier 1)",
+    "Method": "enmo_ai_jerk",
+    "Window Size": 6400,
+    "Decimation Factor": 3,
+    "Model Type": "Transformer",
+    "Gridsearch Hash": "b24ce2b4c8",
+    "Mean Test Score": 0.8630466316225682,
+    "Std Test Score": 0.07324056996495,
+    "Total AHA Windows": 38,
+    "Valid AHA Windows": 38,
+    "Test Subjects": [
+        1,
+        7,
+        18,
+        31,
+        50,
+        51,
+        58,
+        80
+    ],
+    "Healthy Window Fraction": 0.42105263157894735,
+    "Mean AHA Across Valid Windows": 74.57894736842105,
+    "Mean Predicted Probability": 0.3352036774158478,
+    "Background Samples": 38,
+    "Top Features": [
+        {
+            "feature": "Non-dominant jerk",
+            "mean_abs_shap_value": 0.001198009491578922,
+            "mean_signed_shap_value": 5.225824676273725e-06,
+            "mean_feature_value_test": 0.04476535081194702
+        },
+        {
+            "feature": "Asymmetry index",
+            "mean_abs_shap_value": 0.0011060666503502291,
+            "mean_signed_shap_value": 3.0403479117703796e-06,
+            "mean_feature_value_test": 0.0775615099865642
+        },
+        {
+            "feature": "Dominant jerk",
+            "mean_abs_shap_value": 0.0010341947026112585,
+            "mean_signed_shap_value": 1.3732302418084995e-07,
+            "mean_feature_value_test": 0.03584172312076027
+        },
+        {
+            "feature": "Dominant ENMO",
+            "mean_abs_shap_value": 0.001009490486537955,
+            "mean_signed_shap_value": -6.636343451038897e-07,
+            "mean_feature_value_test": 0.0430219447517377
+        },
+        {
+            "feature": "Non-dominant ENMO",
+            "mean_abs_shap_value": 0.0007881561971003255,
+            "mean_signed_shap_value": 2.3476343414538484e-06,
+            "mean_feature_value_test": 0.056880590209283065
+        }
+    ]
+}

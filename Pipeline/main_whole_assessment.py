@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 
+from explain_classifier import explain_best_classifier
 from plotting import plot_corrcoeff, plot_dashboards
 from test_classifier_regressor import test_classifier_regressor
 from train_regressor import train_regressor
@@ -54,6 +55,25 @@ def _subset_per_class(
     return np.concatenate(out) if out else np.array([], dtype=int)
 
 
+def _classifier_explainability_done(save_folder: str) -> bool:
+    explainability_folder = os.path.join(save_folder, "Classifier_explainability")
+    explainability_stats_candidates = [
+        os.path.join(explainability_folder, "best_classifier_1_explainability_stats.json"),
+        os.path.join(explainability_folder, "best_classifier_explainability_stats.json"),
+    ]
+    return any(os.path.exists(path) for path in explainability_stats_candidates)
+
+
+def _week_stats_done(save_folder: str) -> bool:
+    predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
+    return os.path.exists(predictions_df)
+
+
+def _test_stats_done(save_folder: str) -> bool:
+    combined_test_stats = os.path.join(save_folder, "combined_test_stats.json")
+    return os.path.exists(combined_test_stats)
+
+
 def _run_iteration(
     *,
     data_folder: str,
@@ -95,31 +115,41 @@ def _run_iteration(
         regressor_device="cuda:2",
     )
 
-    print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
-    test_classifier_regressor(
-        data_folder,
-        save_folder=save_folder,
-        metadata=test_metadata.copy(),
-        min_mean_test_score=min_mean_test_score,
-        window_size=window_size,
-        decimation_factor=decimation_factor,
-    )
+    if not _test_stats_done(save_folder):
+        print(" ----- TESTING CLASSIFIER AND REGRESSOR ----- ")
+        test_classifier_regressor(
+            data_folder,
+            save_folder=save_folder,
+            metadata=test_metadata.copy(),
+            min_mean_test_score=min_mean_test_score,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+        )
 
-    print(" ----- CREATING DASHBOARDS ----- ")
-    plot_dashboards(
-        data_folder,
-        save_folder=save_folder,
-        metadata=test_metadata.copy(),
-        min_mean_test_score=min_mean_test_score,
-        window_size=window_size,
-        decimation_factor=decimation_factor,
-    )
+    if not _classifier_explainability_done(save_folder):
+        print(" ----- EXPLAINING BEST CLASSIFIER ----- ")
+        explain_best_classifier(
+            data_folder,
+            save_folder=save_folder,
+            metadata=test_metadata.copy(),
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+        )
+
+    if not _week_stats_done(save_folder):
+        print(" ----- CREATING DASHBOARDS ----- ")
+        plot_dashboards(
+            data_folder,
+            save_folder=save_folder,
+            metadata=test_metadata.copy(),
+            min_mean_test_score=min_mean_test_score,
+            window_size=window_size,
+            decimation_factor=decimation_factor,
+        )
 
 
 def _iteration_done(save_folder: str) -> bool:
-    # The dashboard CSV is produced last; if it exists, the iteration is complete.
-    predictions_df = os.path.join(save_folder, "Week_stats", "predictions_dataframe.csv")
-    return os.path.exists(predictions_df)
+    return _week_stats_done(save_folder) and _classifier_explainability_done(save_folder)
 
 
 def _load_or_create_iteration_split(
