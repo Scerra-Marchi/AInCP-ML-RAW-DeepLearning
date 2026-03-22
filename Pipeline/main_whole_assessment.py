@@ -149,7 +149,7 @@ def _run_iteration(
 
 
 def _iteration_done(save_folder: str) -> bool:
-    return _week_stats_done(save_folder) and _classifier_explainability_done(save_folder)
+    return _week_stats_done(save_folder) and _classifier_explainability_done(save_folder) and _test_stats_done(save_folder)
 
 
 def _load_or_create_iteration_split(
@@ -178,6 +178,8 @@ def _load_or_create_iteration_split(
 def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
     r2_list = []
     corrcoef_list = []
+    regressor_pearson_list = []
+
     for i in range(number_of_iterations):
         save_folder = os.path.join(iterations_root, f"Iteration_{i}")
         json_file_path = os.path.join(save_folder, "combined_test_stats.json")
@@ -186,17 +188,25 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
         with open(json_file_path, "r") as json_file:
             data = json.load(json_file)
         r2_list.append(data["GRU Regressor Stats"]["R2 Score"])
+        regressor_pearson_list.append(
+            data["GRU Regressor Stats"]["Pearson Correlation Prediction vs AHA"]
+        )
         corrcoef_list.append(
             data["Selected Classifiers Stats"][0]["Correlation Mean Probability vs AHA"]
         )
 
-    if not r2_list or not corrcoef_list:
+    if not r2_list or not corrcoef_list or not regressor_pearson_list:
         return
 
     average_r2_score = float(np.mean(r2_list))
     average_corr_score = float(np.mean(corrcoef_list))
+    average_regressor_pearson = float(np.mean(regressor_pearson_list))
 
     print(f"The average r2 score for the regressor is: {average_r2_score}")
+    print(
+        "The average Pearson correlation prediction-AHA for the regressor is: "
+        f"{average_regressor_pearson}"
+    )
     print(
         "The average correlation CPI-AHA (using the best classifier CPI for each iteration) is: "
         f"{average_corr_score}"
@@ -204,8 +214,10 @@ def _aggregate_results(iterations_root: str, number_of_iterations: int) -> None:
 
     results = {
         "R2 Score List": r2_list,
+        "Regressor Pearson Correlation List": regressor_pearson_list,
         "Correlation List": corrcoef_list,
         "Average R2 Score": average_r2_score,
+        "Average Regressor Pearson Correlation": average_regressor_pearson,
         "Average CPI-AHA Correlation (Best Classifier CPI per Iteration)": average_corr_score,
     }
 

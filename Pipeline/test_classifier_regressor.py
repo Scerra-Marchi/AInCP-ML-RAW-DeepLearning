@@ -103,6 +103,7 @@ def test_classifier_regressor(
     data_regression = {
         "Regressor path": model_path,
         "R2 Score": r2_score(y, y_pred_gru),
+        "Pearson Correlation Prediction vs AHA": float(np.corrcoef(y_pred_gru, y)[0, 1]),
         "Classifiers Used": model_params_list
     }
 
