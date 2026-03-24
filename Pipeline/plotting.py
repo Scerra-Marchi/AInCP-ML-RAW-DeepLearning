@@ -598,9 +598,6 @@ def _subject_shap_time_of_day_data(
     rounded_slot_values = np.round(np.mod(valid_timestamps, 1.0), 8)
     unique_slots = np.sort(np.unique(rounded_slot_values))
     slots_per_day = unique_slots.size
-    predictions_per_day = valid_timestamps.size / max(unique_days.size, 1)
-    if slots_per_day < 2 or predictions_per_day < 1.0:
-        return None
 
     signed_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
     importance_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
