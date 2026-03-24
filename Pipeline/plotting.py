@@ -795,9 +795,9 @@ def _plot_subject_daily_indicator(stats_folder, subject, subject_cycle_data):
         shading="flat",
     )
     ax_s.set_xlim(time_edges[0], time_edges[-1])
-    ax_s.set_ylabel("Direction")
+    ax_s.set_ylabel("Signed contribution")
     ax_s.set_yticks([])
-    ax_s.set_title(f"Subject {subject} - Components of the explainability-derived indicator over the week")
+    ax_s.set_title(f"Subject {subject} - Components of the DABxP over the week")
     _add_formula_label(ax_s, r"$S_t = \sum_f \phi_{t,f}$")
     plt.colorbar(im_s, ax=ax_s, fraction=0.03, pad=0.02)
 
@@ -811,7 +811,7 @@ def _plot_subject_daily_indicator(stats_folder, subject, subject_cycle_data):
         shading="flat",
     )
     ax_a.set_xlim(time_edges[0], time_edges[-1])
-    ax_a.set_ylabel("Importance")
+    ax_a.set_ylabel("Attribution magnitude")
     ax_a.set_yticks([])
     _add_formula_label(ax_a, r"$A_t = \frac{1}{F} \sum_f |\phi_{t,f}|$")
     plt.colorbar(im_a, ax=ax_a, fraction=0.03, pad=0.02)
@@ -838,18 +838,18 @@ def _plot_subject_daily_indicator(stats_folder, subject, subject_cycle_data):
         outline_linewidth=2.6,
     )
     ax_i.axhline(0.0, color="black", linewidth=0.8)
-    ax_i.set_ylabel("Indicator")
+    ax_i.set_ylabel("DABxP")
     ax_i.set_xlabel("Time")
     ax_i.set_ylim(-1.05 * indicator_limit, 1.05 * indicator_limit)
-    ax_i.set_title(f"Subject {subject} - Explainability-derived indicator over the week")
-    _add_formula_label(ax_i, r"$I_t = S_t \cdot \frac{A_t}{\max_t A_t + \varepsilon}$")
+    ax_i.set_title(f"Subject {subject} - DABxP over the week")
+    _add_formula_label(ax_i, r"$\mathrm{DABxP}_t = S_t \cdot \frac{A_t}{\max_t A_t + \varepsilon}$")
     _apply_axis_style(ax_i, grid_axis="y")
 
     ax_s.tick_params(axis="x", labelbottom=False)
     _set_real_time_heatmap_ticks(ax_a, week_timestamps)
     _set_real_time_heatmap_ticks(ax_i, week_timestamps)
 
-    _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_daily_indicator"))
+    _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_DABxP"))
 
 
 def create_timestamps_list(data_folder, decimation_factor):
