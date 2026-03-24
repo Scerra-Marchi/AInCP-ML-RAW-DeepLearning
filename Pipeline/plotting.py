@@ -70,23 +70,6 @@ def _day_number_label(day_value, first_day_value):
     return f"Day {int(round(float(day_value) - float(first_day_value))) + 1}"
 
 
-def _set_time_of_day_slot_ticks(axes, slot_values):
-    slot_hours = np.asarray(slot_values, dtype=float) * 24.0
-    requested_tick_hours = np.arange(0, 24, 2)
-    tick_positions = []
-    tick_labels = []
-    for hour in requested_tick_hours:
-        position = int(np.argmin(np.abs(slot_hours - hour)))
-        if position not in tick_positions:
-            tick_positions.append(position)
-            tick_labels.append(f"{hour:02d}:00")
-
-    axes = np.atleast_1d(axes)
-    for ax in axes:
-        ax.set_xticks(tick_positions)
-        ax.set_xticklabels(tick_labels)
-
-
 def _slot_hour_edges(slot_hours):
     slot_hours = np.asarray(slot_hours, dtype=float)
     if slot_hours.size == 0:
@@ -204,40 +187,24 @@ def _apply_axis_style(ax, *, grid_axis="y"):
         ax.grid(axis=grid_axis, alpha=0.25)
 
 
-def _set_heatmap_time_ticks(ax, timeline_timestamps):
-    timeline_timestamps = np.asarray(timeline_timestamps, dtype=float)
-    if timeline_timestamps.size == 0:
-        return
-
-    spans_multiple_days = np.floor(timeline_timestamps[-1]) > np.floor(timeline_timestamps[0])
-    if spans_multiple_days:
-        day_numbers = np.floor(timeline_timestamps)
-        unique_days, first_positions = np.unique(day_numbers, return_index=True)
-        first_day = unique_days[0]
-        tick_positions = first_positions
-        tick_labels = [
-            _day_number_label(day_value, first_day)
-            for day_value in unique_days
-        ]
-    else:
-        tick_count = min(6, timeline_timestamps.size)
-        tick_positions = np.linspace(0, timeline_timestamps.size - 1, tick_count, dtype=int)
-        tick_positions = np.unique(tick_positions)
-        tick_labels = [
-            matplotlib.dates.num2date(float(timeline_timestamps[idx])).strftime("%H:%M")
-            for idx in tick_positions
-        ]
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels(tick_labels)
-
-
 def _save_figure(fig, path_base):
     save_kwargs = {"bbox_inches": "tight", "pad_inches": 0.03}
     fig.savefig(path_base + ".pdf", dpi=THESIS_PDF_DPI, **save_kwargs)
     plt.close(fig)
 
 
-def _plot_value_colored_line(ax, x_values, y_values, *, cmap, vmin, vmax, linewidth=2.0):
+def _plot_value_colored_line(
+    ax,
+    x_values,
+    y_values,
+    *,
+    cmap,
+    vmin,
+    vmax,
+    linewidth=2.0,
+    outline_color="#222222",
+    outline_linewidth=None,
+):
     x_values = np.asarray(x_values, dtype=float)
     y_values = np.asarray(y_values, dtype=float)
     valid_mask = np.isfinite(x_values) & np.isfinite(y_values)
@@ -248,12 +215,27 @@ def _plot_value_colored_line(ax, x_values, y_values, *, cmap, vmin, vmax, linewi
     valid_indexes = np.flatnonzero(valid_mask)
     split_points = np.where(np.diff(valid_indexes) > 1)[0] + 1
     segments_indexes = np.split(valid_indexes, split_points)
+    outline_width = linewidth + 1.4 if outline_linewidth is None else outline_linewidth
 
     for segment_indexes in segments_indexes:
         x_segment = x_values[segment_indexes]
         y_segment = y_values[segment_indexes]
+        if outline_color is not None:
+            if x_segment.size == 1:
+                ax.scatter(x_segment, y_segment, color=outline_color, s=10, zorder=2, edgecolors="none")
+            else:
+                ax.plot(
+                    x_segment,
+                    y_segment,
+                    color=outline_color,
+                    linewidth=outline_width,
+                    solid_capstyle="round",
+                    zorder=2,
+                )
+                ax.scatter(x_segment, y_segment, color=outline_color, s=8, zorder=2, edgecolors="none")
+
         if x_segment.size == 1:
-            ax.scatter(x_segment, y_segment, c=y_segment, cmap=cmap, norm=norm, s=18, zorder=3)
+            ax.scatter(x_segment, y_segment, c=y_segment, cmap=cmap, norm=norm, s=6, zorder=3, edgecolors="none")
             continue
 
         points = np.column_stack((x_segment, y_segment)).reshape(-1, 1, 2)
@@ -268,7 +250,7 @@ def _plot_value_colored_line(ax, x_values, y_values, *, cmap, vmin, vmax, linewi
         )
         line_collection.set_array(segment_values)
         ax.add_collection(line_collection)
-        ax.scatter(x_segment, y_segment, c=y_segment, cmap=cmap, norm=norm, s=10, zorder=4, edgecolors="none")
+        ax.scatter(x_segment, y_segment, c=y_segment, cmap=cmap, norm=norm, s=4, zorder=4, edgecolors="none")
 
     ax.autoscale_view()
 
@@ -851,7 +833,9 @@ def _plot_subject_daily_indicator(stats_folder, subject, subject_cycle_data):
         cmap="coolwarm",
         vmin=-indicator_limit,
         vmax=indicator_limit,
-        linewidth=2.6,
+        linewidth=1.6,
+        outline_color="#1f1f1f",
+        outline_linewidth=2.6,
     )
     ax_i.axhline(0.0, color="black", linewidth=0.8)
     ax_i.set_ylabel("Indicator")
