@@ -8,6 +8,7 @@ import numpy as np
 from predict_samples import build_estimators_list, predict_samples
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib.collections import LineCollection
 from train_regressor import (
     build_block_feature_names,
     build_regressor_sample,
@@ -27,6 +28,7 @@ THESIS_PLOT_SIZES = {
     "wide": (6.8, 3.4),
     "corrcoeff": (9.0, 3.4),
 }
+DAILY_INDICATOR_EPS = 1e-6
 _PLOT_STYLE_CONFIGURED = False
 
 
@@ -66,6 +68,118 @@ def _figure_size(kind):
 
 def _day_number_label(day_value, first_day_value):
     return f"Day {int(round(float(day_value) - float(first_day_value))) + 1}"
+
+
+def _set_time_of_day_slot_ticks(axes, slot_values):
+    slot_hours = np.asarray(slot_values, dtype=float) * 24.0
+    requested_tick_hours = np.arange(0, 24, 2)
+    tick_positions = []
+    tick_labels = []
+    for hour in requested_tick_hours:
+        position = int(np.argmin(np.abs(slot_hours - hour)))
+        if position not in tick_positions:
+            tick_positions.append(position)
+            tick_labels.append(f"{hour:02d}:00")
+
+    axes = np.atleast_1d(axes)
+    for ax in axes:
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels)
+
+
+def _slot_hour_edges(slot_hours):
+    slot_hours = np.asarray(slot_hours, dtype=float)
+    if slot_hours.size == 0:
+        return np.array([0.0, 24.0], dtype=float)
+    if slot_hours.size == 1:
+        half_width = 0.5
+        edges = np.array([slot_hours[0] - half_width, slot_hours[0] + half_width], dtype=float)
+    else:
+        diffs = np.diff(slot_hours)
+        edges = np.empty(slot_hours.size + 1, dtype=float)
+        edges[1:-1] = 0.5 * (slot_hours[:-1] + slot_hours[1:])
+        edges[0] = slot_hours[0] - 0.5 * diffs[0]
+        edges[-1] = slot_hours[-1] + 0.5 * diffs[-1]
+    return np.clip(edges, 0.0, 24.0)
+
+
+def _time_edges(x_values):
+    x_values = np.asarray(x_values, dtype=float)
+    if x_values.size == 0:
+        return np.array([0.0, 1.0], dtype=float)
+    if x_values.size == 1:
+        half_width = 0.5 / 24.0
+        return np.array([x_values[0] - half_width, x_values[0] + half_width], dtype=float)
+    diffs = np.diff(x_values)
+    edges = np.empty(x_values.size + 1, dtype=float)
+    edges[1:-1] = 0.5 * (x_values[:-1] + x_values[1:])
+    edges[0] = x_values[0] - 0.5 * diffs[0]
+    edges[-1] = x_values[-1] + 0.5 * diffs[-1]
+    return edges
+
+
+def _expand_regular_grid(values, *arrays, axis=-1, period=None):
+    values = np.asarray(values, dtype=float)
+    if values.size < 2:
+        return values, arrays
+
+    diffs = np.diff(values)
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    if diffs.size == 0:
+        return values, arrays
+
+    step = float(np.median(diffs))
+    if period is None:
+        grid = values[0] + np.arange(int(round((values[-1] - values[0]) / step)) + 1, dtype=float) * step
+        indexes = np.rint((values - values[0]) / step).astype(int)
+    else:
+        phase = float(np.mod(values[0], step))
+        grid = phase + np.arange(int(np.floor((period - phase - 1e-12) / step)) + 1, dtype=float) * step
+        indexes = np.rint((values - grid[0]) / step).astype(int)
+
+    if np.any(indexes < 0) or np.any(indexes >= grid.size):
+        return values, arrays
+    if np.max(np.abs(grid[indexes] - values)) > 0.25 * step:
+        return values, arrays
+
+    expanded_arrays = []
+    for arr in arrays:
+        arr_np = np.asarray(arr, dtype=float)
+        target_shape = list(arr_np.shape)
+        target_shape[axis] = grid.size
+        expanded = np.full(target_shape, np.nan, dtype=float)
+        target = [slice(None)] * expanded.ndim
+        source = [slice(None)] * arr_np.ndim
+        for source_idx, target_idx in enumerate(indexes):
+            target[axis] = target_idx
+            source[axis] = source_idx
+            expanded[tuple(target)] = arr_np[tuple(source)]
+        expanded_arrays.append(expanded)
+
+    return grid, tuple(expanded_arrays)
+
+
+def _set_real_time_heatmap_ticks(ax, timeline_timestamps):
+    timeline_timestamps = np.asarray(timeline_timestamps, dtype=float)
+    if timeline_timestamps.size == 0:
+        return
+
+    spans_multiple_days = np.floor(timeline_timestamps[-1]) > np.floor(timeline_timestamps[0])
+    if spans_multiple_days:
+        day_numbers = np.floor(timeline_timestamps)
+        unique_days, first_positions = np.unique(day_numbers, return_index=True)
+        tick_positions = timeline_timestamps[first_positions]
+        first_day = unique_days[0]
+        tick_labels = [_day_number_label(day_value, first_day) for day_value in unique_days]
+    else:
+        tick_count = min(6, timeline_timestamps.size)
+        tick_indexes = np.linspace(0, timeline_timestamps.size - 1, tick_count, dtype=int)
+        tick_indexes = np.unique(tick_indexes)
+        tick_positions = timeline_timestamps[tick_indexes]
+        tick_labels = [matplotlib.dates.num2date(float(tick)).strftime("%H:%M") for tick in tick_positions]
+
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
 
 
 def _new_figure(kind, *, nrows=1, ncols=1, sharex=False, gridspec_kw=None):
@@ -121,6 +235,55 @@ def _save_figure(fig, path_base):
     save_kwargs = {"bbox_inches": "tight", "pad_inches": 0.03}
     fig.savefig(path_base + ".pdf", dpi=THESIS_PDF_DPI, **save_kwargs)
     plt.close(fig)
+
+
+def _plot_value_colored_line(ax, x_values, y_values, *, cmap, vmin, vmax, linewidth=2.0):
+    x_values = np.asarray(x_values, dtype=float)
+    y_values = np.asarray(y_values, dtype=float)
+    valid_mask = np.isfinite(x_values) & np.isfinite(y_values)
+    if not np.any(valid_mask):
+        return
+
+    norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+    valid_indexes = np.flatnonzero(valid_mask)
+    split_points = np.where(np.diff(valid_indexes) > 1)[0] + 1
+    segments_indexes = np.split(valid_indexes, split_points)
+
+    for segment_indexes in segments_indexes:
+        x_segment = x_values[segment_indexes]
+        y_segment = y_values[segment_indexes]
+        if x_segment.size == 1:
+            ax.scatter(x_segment, y_segment, c=y_segment, cmap=cmap, norm=norm, s=18, zorder=3)
+            continue
+
+        points = np.column_stack((x_segment, y_segment)).reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        segment_values = 0.5 * (y_segment[:-1] + y_segment[1:])
+        line_collection = LineCollection(
+            segments,
+            cmap=cmap,
+            norm=norm,
+            linewidths=linewidth,
+            zorder=3,
+        )
+        line_collection.set_array(segment_values)
+        ax.add_collection(line_collection)
+        ax.scatter(x_segment, y_segment, c=y_segment, cmap=cmap, norm=norm, s=10, zorder=4, edgecolors="none")
+
+    ax.autoscale_view()
+
+
+def _add_formula_label(ax, formula_text):
+    ax.text(
+        0.985,
+        0.82,
+        formula_text,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+        bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": "0.8", "alpha": 0.9},
+    )
 
 
 def _percent_label(text):
@@ -406,7 +569,7 @@ def _plot_global_time_of_day_importance(global_stats_folder, subject_cycle_data_
     for subject_idx, subject_cycle_data in enumerate(subject_cycle_data_list):
         for slot_value, mean_abs_value in zip(
             subject_cycle_data["slot_values"],
-            subject_cycle_data["mean_abs"],
+            subject_cycle_data["mean_importance"],
         ):
             aligned_matrix[subject_idx, slot_to_index[float(slot_value)]] = float(mean_abs_value)
 
@@ -432,10 +595,12 @@ def _subject_shap_time_of_day_data(
     *,
     timeline_timestamps,
     signed_time_contribution,
+    time_importance,
     invalid_mask,
 ):
     timeline_timestamps = np.asarray(timeline_timestamps, dtype=float)
     signed_time_contribution = np.asarray(signed_time_contribution, dtype=float)
+    time_importance = np.asarray(time_importance, dtype=float)
     invalid_mask = np.asarray(invalid_mask, dtype=bool)
 
     valid_mask = ~invalid_mask
@@ -444,7 +609,7 @@ def _subject_shap_time_of_day_data(
 
     valid_timestamps = timeline_timestamps[valid_mask]
     valid_signed = signed_time_contribution[valid_mask]
-    valid_abs = np.abs(valid_signed)
+    valid_importance = time_importance[valid_mask]
 
     day_numbers = np.floor(valid_timestamps)
     unique_days = np.sort(np.unique(day_numbers))
@@ -456,13 +621,13 @@ def _subject_shap_time_of_day_data(
         return None
 
     signed_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
-    abs_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
+    importance_sum = np.zeros((unique_days.size, slots_per_day), dtype=float)
     counts = np.zeros((unique_days.size, slots_per_day), dtype=float)
 
     day_idx = np.searchsorted(unique_days, day_numbers)
     slot_idx = np.searchsorted(unique_slots, rounded_slot_values)
     np.add.at(signed_sum, (day_idx, slot_idx), valid_signed)
-    np.add.at(abs_sum, (day_idx, slot_idx), valid_abs)
+    np.add.at(importance_sum, (day_idx, slot_idx), valid_importance)
     np.add.at(counts, (day_idx, slot_idx), 1.0)
 
     signed_matrix = np.divide(
@@ -471,14 +636,25 @@ def _subject_shap_time_of_day_data(
         out=np.full_like(signed_sum, np.nan),
         where=counts > 0,
     )
-    abs_matrix = np.divide(
-        abs_sum,
+    importance_matrix = np.divide(
+        importance_sum,
         counts,
-        out=np.full_like(abs_sum, np.nan),
+        out=np.full_like(importance_sum, np.nan),
         where=counts > 0,
     )
     mean_signed = np.nanmean(signed_matrix, axis=0)
-    mean_abs = np.nanmean(abs_matrix, axis=0)
+    mean_importance = np.nanmean(importance_matrix, axis=0)
+    week_timestamps, (week_signed, week_importance) = _expand_regular_grid(
+        valid_timestamps,
+        valid_signed,
+        valid_importance,
+        axis=0,
+        period=None,
+    )
+    week_signed = np.asarray(week_signed, dtype=float)
+    week_importance = np.asarray(week_importance, dtype=float)
+    week_importance_max = float(np.nanmax(week_importance)) if np.any(np.isfinite(week_importance)) else 0.0
+    week_indicator = week_signed * (week_importance / (week_importance_max + DAILY_INDICATOR_EPS))
     first_day = unique_days[0]
     day_labels = [
         _day_number_label(day_value, first_day)
@@ -490,7 +666,11 @@ def _subject_shap_time_of_day_data(
         "slot_values": unique_slots,
         "signed_matrix": signed_matrix,
         "mean_signed": mean_signed,
-        "mean_abs": mean_abs,
+        "mean_importance": mean_importance,
+        "week_timestamps": week_timestamps,
+        "week_signed": week_signed,
+        "week_importance": week_importance,
+        "week_indicator": week_indicator,
     }
 
 
@@ -498,11 +678,19 @@ def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_
     if subject_cycle_data is None:
         return
 
-    signed_matrix = subject_cycle_data["signed_matrix"]
-    mean_signed = subject_cycle_data["mean_signed"]
-    mean_abs = subject_cycle_data["mean_abs"]
-    slot_values = subject_cycle_data["slot_values"]
+    signed_matrix = np.asarray(subject_cycle_data["signed_matrix"], dtype=float)
+    mean_signed = np.asarray(subject_cycle_data["mean_signed"], dtype=float)
+    mean_importance = np.asarray(subject_cycle_data["mean_importance"], dtype=float)
+    slot_values = np.asarray(subject_cycle_data["slot_values"], dtype=float)
     day_labels = subject_cycle_data["day_labels"]
+    slot_values, (signed_matrix, mean_signed, mean_importance) = _expand_regular_grid(
+        slot_values,
+        signed_matrix,
+        mean_signed,
+        mean_importance,
+        axis=-1,
+        period=1.0,
+    )
 
     signed_limit = np.nanmax(np.abs(signed_matrix))
     if not np.isfinite(signed_limit) or signed_limit == 0.0:
@@ -510,7 +698,7 @@ def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_
     if not np.isfinite(signed_limit) or signed_limit == 0.0:
         signed_limit = 1.0
 
-    abs_limit = np.nanmax(mean_abs)
+    abs_limit = np.nanmax(mean_importance)
     if not np.isfinite(abs_limit) or abs_limit == 0.0:
         abs_limit = 1.0
 
@@ -524,58 +712,160 @@ def _plot_subject_shap_time_of_day_heatmap(stats_folder, subject, subject_cycle_
         constrained_layout=True,
     )
 
-    im_days = axes[0].imshow(
-        signed_matrix,
-        aspect="auto",
+    slot_hours = np.asarray(slot_values, dtype=float) * 24.0
+    slot_edges = _slot_hour_edges(slot_hours)
+    day_edges = np.arange(signed_matrix.shape[0] + 1, dtype=float)
+
+    im_days = axes[0].pcolormesh(
+        slot_edges,
+        day_edges,
+        np.ma.masked_invalid(signed_matrix),
         cmap="coolwarm",
         vmin=-signed_limit,
         vmax=signed_limit,
+        shading="flat",
     )
-    axes[0].set_yticks(np.arange(len(day_labels)))
+    axes[0].set_xlim(0.0, 24.0)
+    axes[0].set_yticks(np.arange(len(day_labels)) + 0.5)
     axes[0].set_yticklabels(day_labels)
     axes[0].set_title(f"Subject {subject} - SHAP impact over the daily cycle")
     axes[0].set_ylabel("Day")
     plt.colorbar(im_days, ax=axes[0], fraction=0.03, pad=0.02, label="Signed contribution")
 
-    im_mean_signed = axes[1].imshow(
-        mean_signed.reshape(1, -1),
-        aspect="auto",
+    heatmap_y_edges = np.array([0.0, 1.0], dtype=float)
+    im_mean_signed = axes[1].pcolormesh(
+        slot_edges,
+        heatmap_y_edges,
+        np.ma.masked_invalid(mean_signed.reshape(1, -1)),
         cmap="coolwarm",
         vmin=-signed_limit,
         vmax=signed_limit,
+        shading="flat",
     )
-    axes[1].set_yticks([0])
+    axes[1].set_xlim(0.0, 24.0)
+    axes[1].set_yticks([0.5])
     axes[1].set_yticklabels(["Mean signed"])
     plt.colorbar(im_mean_signed, ax=axes[1], fraction=0.03, pad=0.02, label="Contribution")
 
-    im_mean_abs = axes[2].imshow(
-        mean_abs.reshape(1, -1),
-        aspect="auto",
+    im_mean_abs = axes[2].pcolormesh(
+        slot_edges,
+        heatmap_y_edges,
+        np.ma.masked_invalid(mean_importance.reshape(1, -1)),
         cmap="magma",
         vmin=0.0,
         vmax=abs_limit,
+        shading="flat",
     )
-    axes[2].set_yticks([0])
+    axes[2].set_xlim(0.0, 24.0)
+    axes[2].set_yticks([0.5])
     axes[2].set_yticklabels(["Mean |SHAP|"])
     axes[2].set_xlabel("Time of day")
     plt.colorbar(im_mean_abs, ax=axes[2], fraction=0.03, pad=0.02, label="Magnitude")
 
-    slot_hours = slot_values * 24.0
-    requested_tick_hours = np.arange(0, 24, 2)
-    tick_positions = []
-    tick_labels = []
-    for hour in requested_tick_hours:
-        position = int(np.argmin(np.abs(slot_hours - hour)))
-        if position not in tick_positions:
-            tick_positions.append(position)
-            tick_labels.append(f"{hour:02d}:00")
-    axes[2].set_xticks(tick_positions)
-    axes[2].set_xticklabels(tick_labels)
-    for ax in axes[:2]:
-        ax.set_xticks(tick_positions)
+    tick_hours = np.arange(0, 24, 2)
+    tick_labels = [f"{int(hour):02d}:00" for hour in tick_hours]
+    for ax in axes:
+        ax.set_xticks(tick_hours)
         ax.set_xticklabels(tick_labels)
 
     _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_shap_time_of_day_heatmap"))
+
+
+def _plot_subject_daily_indicator(stats_folder, subject, subject_cycle_data):
+    if subject_cycle_data is None:
+        return
+
+    week_timestamps = np.asarray(subject_cycle_data["week_timestamps"], dtype=float)
+    week_signed = np.asarray(subject_cycle_data["week_signed"], dtype=float)
+    week_importance = np.asarray(subject_cycle_data["week_importance"], dtype=float)
+    week_indicator = np.asarray(subject_cycle_data["week_indicator"], dtype=float)
+
+    signed_limit = np.nanmax(np.abs(week_signed))
+    if not np.isfinite(signed_limit) or signed_limit == 0.0:
+        signed_limit = 1.0
+
+    abs_limit = np.nanmax(week_importance)
+    if not np.isfinite(abs_limit) or abs_limit == 0.0:
+        abs_limit = 1.0
+
+    indicator_limit = np.nanmax(np.abs(week_indicator))
+    if not np.isfinite(indicator_limit) or indicator_limit == 0.0:
+        indicator_limit = 1.0
+
+    fig = plt.figure(figsize=(7.8, 5.9), constrained_layout=True)
+    grid = fig.add_gridspec(4, 1, height_ratios=[1.0, 1.0, 0.22, 1.1])
+    ax_s = fig.add_subplot(grid[0, 0])
+    ax_a = fig.add_subplot(grid[1, 0], sharex=ax_s)
+    ax_link = fig.add_subplot(grid[2, 0])
+    ax_i = fig.add_subplot(grid[3, 0], sharex=ax_s)
+    axes = [ax_s, ax_a, ax_i]
+
+    time_edges = _time_edges(week_timestamps)
+    heatmap_y_edges = np.array([0.0, 1.0], dtype=float)
+
+    im_s = ax_s.pcolormesh(
+        time_edges,
+        heatmap_y_edges,
+        np.ma.masked_invalid(week_signed.reshape(1, -1)),
+        cmap="coolwarm",
+        vmin=-signed_limit,
+        vmax=signed_limit,
+        shading="flat",
+    )
+    ax_s.set_xlim(time_edges[0], time_edges[-1])
+    ax_s.set_ylabel("Direction")
+    ax_s.set_yticks([])
+    ax_s.set_title(f"Subject {subject} - Components of the explainability-derived indicator over the week")
+    _add_formula_label(ax_s, r"$S_t = \sum_f \phi_{t,f}$")
+    plt.colorbar(im_s, ax=ax_s, fraction=0.03, pad=0.02)
+
+    im_a = ax_a.pcolormesh(
+        time_edges,
+        heatmap_y_edges,
+        np.ma.masked_invalid(week_importance.reshape(1, -1)),
+        cmap="magma",
+        vmin=0.0,
+        vmax=abs_limit,
+        shading="flat",
+    )
+    ax_a.set_xlim(time_edges[0], time_edges[-1])
+    ax_a.set_ylabel("Importance")
+    ax_a.set_yticks([])
+    _add_formula_label(ax_a, r"$A_t = \frac{1}{F} \sum_f |\phi_{t,f}|$")
+    plt.colorbar(im_a, ax=ax_a, fraction=0.03, pad=0.02)
+
+    ax_link.axis("off")
+    ax_link.text(
+        0.5,
+        0.40,
+        r"$\Downarrow$",
+        ha="center",
+        va="center",
+        fontsize=18,
+    )
+
+    _plot_value_colored_line(
+        ax_i,
+        week_timestamps,
+        week_indicator,
+        cmap="coolwarm",
+        vmin=-indicator_limit,
+        vmax=indicator_limit,
+        linewidth=2.6,
+    )
+    ax_i.axhline(0.0, color="black", linewidth=0.8)
+    ax_i.set_ylabel("Indicator")
+    ax_i.set_xlabel("Time")
+    ax_i.set_ylim(-1.05 * indicator_limit, 1.05 * indicator_limit)
+    ax_i.set_title(f"Subject {subject} - Explainability-derived indicator over the week")
+    _add_formula_label(ax_i, r"$I_t = S_t \cdot \frac{A_t}{\max_t A_t + \varepsilon}$")
+    _apply_axis_style(ax_i, grid_axis="y")
+
+    ax_s.tick_params(axis="x", labelbottom=False)
+    _set_real_time_heatmap_ticks(ax_a, week_timestamps)
+    _set_real_time_heatmap_ticks(ax_i, week_timestamps)
+
+    _save_figure(fig, os.path.join(stats_folder, f"subject_{subject}_daily_indicator"))
 
 
 def create_timestamps_list(data_folder, decimation_factor):
@@ -786,18 +1076,35 @@ def plot_dashboards(
             global_attr_rows.append(attr[valid_regressor_mask])
             global_feature_rows.append(regressor_sequence_scaled[valid_regressor_mask])
 
+        heatmap_timestamps, (heatmap_abs_attr,) = _expand_regular_grid(
+            regressor_timestamps,
+            abs_attr,
+            axis=0,
+            period=None,
+        )
         heatmap_height = max(4.2, 1.8 + 0.22 * len(feature_names))
         fig, ax = plt.subplots(figsize=(6.6, heatmap_height), constrained_layout=True)
         vmax = np.nanpercentile(abs_attr, 99)
         if not np.isfinite(vmax) or vmax <= 0.0:
             vmax = 1.0
-        im = ax.imshow(abs_attr.T, aspect="auto", cmap="inferno", vmin=0.0, vmax=vmax)
+        time_edges = _time_edges(heatmap_timestamps)
+        feature_edges = np.arange(len(feature_names) + 1, dtype=float)
+        im = ax.pcolormesh(
+            time_edges,
+            feature_edges,
+            np.ma.masked_invalid(heatmap_abs_attr.T),
+            cmap="inferno",
+            vmin=0.0,
+            vmax=vmax,
+            shading="flat",
+        )
         fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="|SHAP value|")
         ax.set_xlabel("Time")
         ax.set_ylabel("Feature")
-        ax.set_yticks(np.arange(len(feature_names)))
+        ax.set_yticks(np.arange(len(feature_names)) + 0.5)
         ax.set_yticklabels(feature_names)
-        _set_heatmap_time_ticks(ax, regressor_timestamps)
+        ax.set_xlim(time_edges[0], time_edges[-1])
+        _set_real_time_heatmap_ticks(ax, heatmap_timestamps)
         ax.set_title(f"Subject {subject} - SHAP heatmap")
         _save_figure(fig, os.path.join(subject_stats_folder, f"subject_{subject}_explain_heatmap"))
 
@@ -1004,9 +1311,15 @@ def plot_dashboards(
         subject_cycle_data = _subject_shap_time_of_day_data(
             timeline_timestamps=regressor_timestamps,
             signed_time_contribution=signed_time_contribution,
+            time_importance=time_importance,
             invalid_mask=regressor_invalid_mask,
         )
         _plot_subject_shap_time_of_day_heatmap(
+            subject_stats_folder,
+            subject,
+            subject_cycle_data,
+        )
+        _plot_subject_daily_indicator(
             subject_stats_folder,
             subject,
             subject_cycle_data,
