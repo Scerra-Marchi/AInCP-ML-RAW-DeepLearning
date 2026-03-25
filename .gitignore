@@ -18,5 +18,8 @@ Pipeline/Iterations_debug/
 # ignore generated timestamp cache files (e.g., timestamps_list_decim_3.joblib)
 **/timestamps_list_decim_*.joblib
 
+# ignore compressed archives
+*.tar.gz
+
 # ignore Dataset
 Dataset
